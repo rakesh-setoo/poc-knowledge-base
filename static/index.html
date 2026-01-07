@@ -10,7 +10,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+
+  <!-- Modular CSS -->
+  <link rel="stylesheet" href="/static/css/variables.css">
+  <link rel="stylesheet" href="/static/css/layout.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/upload.css">
+  <link rel="stylesheet" href="/static/css/results.css">
+  <link rel="stylesheet" href="/static/css/utilities.css">
 </head>
 
 <body>
@@ -103,6 +110,9 @@
                 ✨ Ask AI
               </button>
             </div>
+            <div class="response-time-badge" id="responseTimeBadge" style="display: none;">
+              ⚡ Response time: <span id="responseTime">0.00</span>s
+            </div>
           </div>
 
           <div class="loading" id="loading">
@@ -118,7 +128,14 @@
     </div>
   </div>
 
-  <script src="/static/index.js"></script>
+  <!-- Modular JavaScript -->
+  <script src="/static/js/config.js"></script>
+  <script src="/static/js/utils.js"></script>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/upload.js"></script>
+  <script src="/static/js/datasets.js"></script>
+  <script src="/static/js/query.js"></script>
+  <script src="/static/js/app.js"></script>
 </body>
 
 </html>

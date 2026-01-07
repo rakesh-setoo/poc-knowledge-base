@@ -1,0 +1,151 @@
+/*
+ * Results Styles
+ * Query results, data tables, insights
+ */
+
+/* Results Section */
+.results-section {
+  display: none;
+}
+
+.results-section.show {
+  display: block;
+  animation: fadeIn 0.3s ease;
+}
+
+.result-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.result-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.result-answer {
+  font-size: 1.125rem;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+.result-sql {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.875rem;
+  color: var(--accent-secondary);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.result-meta {
+  display: flex;
+  gap: 1.5rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.result-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: var(--error);
+  padding: 1rem 1.25rem;
+  border-radius: 12px;
+}
+
+/* Data Table */
+.result-table-wrapper {
+  overflow-x: auto;
+  margin-top: 0.75rem;
+}
+
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.result-table th {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  padding: 0.875rem 1rem;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.result-table td {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.result-table tr:hover td {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.result-table .rank-cell {
+  color: var(--accent-secondary);
+  font-weight: 600;
+  width: 50px;
+}
+
+.result-table .number-cell {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  color: var(--success);
+  text-align: right;
+}
+
+.result-table .name-cell {
+  font-weight: 500;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Insight Box */
+.result-insight {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.result-insight .insight-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.result-insight .insight-text {
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.row-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--success);
+  padding: 0.375rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}

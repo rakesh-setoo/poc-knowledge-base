@@ -1,12 +1,8 @@
-"""
-Custom exception classes for the application.
-Provides structured error handling with proper HTTP status codes.
-"""
 from fastapi import HTTPException, status
 
 
 class AppException(Exception):
-    """Base exception for all application errors."""
+    status_code: int = 500
     
     def __init__(self, message: str, details: dict = None):
         self.message = message
@@ -15,51 +11,41 @@ class AppException(Exception):
 
 
 class DatasetNotFoundError(AppException):
-    """Raised when a requested dataset doesn't exist."""
-    pass
+    status_code = 404
 
 
 class NoDatasetError(AppException):
-    """Raised when no datasets are available."""
-    pass
+    status_code = 400
 
 
 class SQLGenerationError(AppException):
-    """Raised when SQL generation fails."""
-    pass
+    status_code = 400
 
 
 class SQLExecutionError(AppException):
-    """Raised when SQL execution fails."""
-    pass
+    status_code = 400
 
 
 class SQLValidationError(AppException):
-    """Raised when SQL validation fails."""
-    pass
+    status_code = 400
 
 
 class FileUploadError(AppException):
-    """Raised when file upload fails."""
-    pass
+    status_code = 400
 
 
 class LLMError(AppException):
-    """Raised when LLM call fails."""
-    pass
+    status_code = 500
 
 
 # HTTP Exception helpers
 def not_found(message: str) -> HTTPException:
-    """Return a 404 Not Found exception."""
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
 
 
 def bad_request(message: str) -> HTTPException:
-    """Return a 400 Bad Request exception."""
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
 
 
 def server_error(message: str) -> HTTPException:
-    """Return a 500 Internal Server Error exception."""
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)

@@ -2,11 +2,9 @@ from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.pool import QueuePool
 import json
 
-from app.config import settings
-from app.logging_config import logger
+from app.core.config import settings
+from app.logging.logging_config import logger
 
-
-# Create engine with connection pooling for production
 engine = create_engine(
     settings.database_url,
     poolclass=QueuePool,
@@ -75,7 +73,6 @@ def save_dataset_metadata(metadata: dict):
 
 
 def load_all_datasets() -> list:
-    """Load all dataset metadata from the database."""
     inspector = inspect(engine)
     
     # Check for new table first, fall back to old table
@@ -115,7 +112,6 @@ def load_all_datasets() -> list:
 
 
 def delete_dataset_metadata(table_name: str):
-    """Delete dataset metadata from the database."""
     try:
         with engine.connect() as conn:
             # Try new table first

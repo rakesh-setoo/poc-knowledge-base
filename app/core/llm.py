@@ -1,6 +1,6 @@
 from openai import OpenAI, OpenAIError
-from app.config import settings
-from app.exceptions import LLMError
+from app.core.config import settings
+from app.logging.exceptions import LLMError
 
 
 client = OpenAI(api_key=settings.openai_api_key)
@@ -12,7 +12,6 @@ def llm_call(
     max_tokens: int = 2000,
     system_prompt: str = "You are a helpful data assistant"
 ) -> str:
-    """LLM call using streaming, returns the complete response."""
     try:
         stream = client.chat.completions.create(
             model=settings.openai_model,
