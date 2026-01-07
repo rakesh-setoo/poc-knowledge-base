@@ -1,7 +1,3 @@
-"""
-Centralized configuration management using Pydantic settings.
-Provides type-safe, validated configuration from environment variables.
-"""
 from functools import lru_cache
 from typing import Optional
 from pydantic_settings import BaseSettings
@@ -9,8 +5,6 @@ from pydantic import Field
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
-    
     # Application
     app_name: str = Field(default="Millenium Semiconductors AI", description="Application name")
     app_version: str = Field(default="1.0.0", description="Application version")
@@ -28,7 +22,7 @@ class Settings(BaseSettings):
     
     # OpenAI
     openai_api_key: str = Field(..., description="OpenAI API key")
-    openai_model: str = Field(default="gpt-4o-mini", description="OpenAI model to use")
+    openai_model: str = Field(default="gpt-5.2", description="OpenAI model to use")
     
     # Security
     cors_origins: str = Field(default="*", description="Comma-separated list of allowed CORS origins")

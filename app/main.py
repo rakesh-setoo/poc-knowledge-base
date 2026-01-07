@@ -1,7 +1,3 @@
-"""
-Millenium Semiconductors AI - Main Application
-FastAPI application for querying Excel data using natural language.
-"""
 from fastapi import FastAPI, UploadFile, Body, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -194,43 +190,165 @@ async def delete_dataset(table_name: str):
 
 @app.post("/upload-excel", tags=["Datasets"])
 async def upload_excel(file: UploadFile):
-    """Upload an Excel file and create a queryable dataset."""
+    """Upload an Excel or CSV file and create a queryable dataset with progress streaming."""
+    from fastapi.responses import StreamingResponse
+    import asyncio
+    
     global DATASETS
     
-    logger.info(f"Uploading file: {file.filename}")
+    async def process_with_progress():
+        """Generator that yields dynamic progress updates as SSE events."""
+        import io
+        try:
+            filename = file.filename.lower()
+            
+            # Phase 1: Read file in chunks (0-30%)
+            yield f"data: {json.dumps({'progress': 1, 'status': '1% - Starting upload...'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            chunks = []
+            total_size = 0
+            chunk_size = 64 * 1024
+            
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total_size += len(chunk)
+                read_progress = min(28, int((total_size / (1024 * 1024)) * 5) + 2)
+                yield f"data: {json.dumps({'progress': read_progress, 'status': f'{read_progress}% - Reading file... ({total_size // 1024} KB)'})}\n\n"
+                await asyncio.sleep(0.02)
+            
+            content = b''.join(chunks)
+            
+            # Phase 2: Parse file (30-55%)
+            yield f"data: {json.dumps({'progress': 30, 'status': '30% - File read complete, parsing...'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            try:
+                if filename.endswith('.csv'):
+                    yield f"data: {json.dumps({'progress': 35, 'status': '35% - Detecting encoding...'})}\n\n"
+                    await asyncio.sleep(0.05)
+                    
+                    df = None
+                    for idx, encoding in enumerate(['utf-8', 'latin1', 'cp1252', 'iso-8859-1']):
+                        try:
+                            df = pd.read_csv(io.BytesIO(content), encoding=encoding)
+                            progress = 40 + (idx * 3)
+                            yield f"data: {json.dumps({'progress': progress, 'status': f'{progress}% - Parsing CSV...'})}\n\n"
+                            break
+                        except UnicodeDecodeError:
+                            continue
+                    if df is None:
+                        yield f"data: {json.dumps({'progress': 0, 'status': 'Error', 'error': 'Could not read CSV file. Please ensure it is a valid CSV with UTF-8 or Latin encoding.'})}\n\n"
+                        return
+                        
+                elif filename.endswith(('.xlsx', '.xls')):
+                    yield f"data: {json.dumps({'progress': 35, 'status': '35% - Reading Excel structure...'})}\n\n"
+                    await asyncio.sleep(0.05)
+                    
+                    df_raw = pd.read_excel(io.BytesIO(content), header=None)
+                    
+                    yield f"data: {json.dumps({'progress': 42, 'status': '42% - Detecting header row...'})}\n\n"
+                    await asyncio.sleep(0.05)
+                    
+                    header_row = 0
+                    max_valid_cols = 0
+                    for i in range(min(10, len(df_raw))):
+                        row = df_raw.iloc[i]
+                        valid_cols = sum(1 for v in row if pd.notna(v) and isinstance(v, str) and len(str(v)) > 1)
+                        if valid_cols > max_valid_cols:
+                            max_valid_cols = valid_cols
+                            header_row = i
+                    
+                    yield f"data: {json.dumps({'progress': 48, 'status': '48% - Parsing Excel data...'})}\n\n"
+                    await asyncio.sleep(0.05)
+                    
+                    df = pd.read_excel(io.BytesIO(content), header=header_row)
+                    df = df.loc[:, ~df.columns.astype(str).str.contains('Unnamed')]
+                    df = df.dropna(axis=1, how='all')
+                else:
+                    yield f"data: {json.dumps({'progress': 0, 'status': 'Error', 'error': 'Unsupported file type. Please upload .xlsx, .xls, or .csv files.'})}\n\n"
+                    return
+                    
+            except Exception as e:
+                yield f"data: {json.dumps({'progress': 0, 'status': 'Error', 'error': f'Failed to parse file: {str(e)}'})}\n\n"
+                return
+            
+            # Phase 3: Clean data (55-60%)
+            yield f"data: {json.dumps({'progress': 55, 'status': '55% - Cleaning column names...'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            df.columns = (
+                df.columns.astype(str)
+                .str.lower()
+                .str.replace(" ", "_")
+                .str.replace(r"[^a-z0-9_]", "", regex=True)
+            )
+            
+            total_rows = len(df)
+            yield f"data: {json.dumps({'progress': 60, 'status': f'60% - Data cleaned ({total_rows:,} rows)'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            # Phase 4: Save to database (60-95%)
+            file_type = "csv" if filename.endswith('.csv') else "excel"
+            table_name = f"dataset_{uuid.uuid4().hex[:8]}"
+            
+            if total_rows <= 1000:
+                yield f"data: {json.dumps({'progress': 75, 'status': '75% - Saving to database...'})}\n\n"
+                await asyncio.sleep(0.05)
+                df.to_sql(table_name, engine, index=False, if_exists="replace")
+                yield f"data: {json.dumps({'progress': 92, 'status': '92% - Database save complete'})}\n\n"
+            else:
+                chunk_size = max(100, total_rows // 20)
+                rows_inserted = 0
+                
+                for i in range(0, total_rows, chunk_size):
+                    chunk_df = df.iloc[i:i + chunk_size]
+                    if_exists = "replace" if i == 0 else "append"
+                    chunk_df.to_sql(table_name, engine, index=False, if_exists=if_exists)
+                    
+                    rows_inserted += len(chunk_df)
+                    insert_progress = 60 + int((rows_inserted / total_rows) * 32)
+                    yield f"data: {json.dumps({'progress': insert_progress, 'status': f'{insert_progress}% - Saving rows {rows_inserted:,}/{total_rows:,}...'})}\n\n"
+                    await asyncio.sleep(0.02)
+            
+            # Phase 5: Finalize (95-100%)
+            yield f"data: {json.dumps({'progress': 95, 'status': '95% - Saving metadata...'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            metadata = {
+                "table_name": table_name,
+                "file_name": file.filename,
+                "file_type": file_type,
+                "columns": list(df.columns),
+                "row_count": total_rows
+            }
+            
+            save_dataset_metadata(metadata)
+            
+            yield f"data: {json.dumps({'progress': 98, 'status': '98% - Refreshing datasets...'})}\n\n"
+            await asyncio.sleep(0.05)
+            
+            global DATASETS
+            DATASETS = load_all_datasets()
+            
+            yield f"data: {json.dumps({'progress': 100, 'status': '100% - Upload complete!', 'result': metadata})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Upload error: {str(e)}")
+            yield f"data: {json.dumps({'progress': 0, 'status': 'Error', 'error': str(e)})}\n\n"
     
-    try:
-        df = pd.read_excel(file.file)
-    except Exception as e:
-        logger.error(f"Failed to read Excel file: {e}")
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": f"Failed to read Excel file: {str(e)}"}
-        )
-
-    # Clean column names
-    df.columns = (
-        df.columns.astype(str)
-        .str.lower()
-        .str.replace(" ", "_")
-        .str.replace(r"[^a-z0-9_]", "", regex=True)
+    return StreamingResponse(
+        process_with_progress(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
     )
-
-    table_name = f"excel_{uuid.uuid4().hex[:8]}"
-    df.to_sql(table_name, engine, index=False, if_exists="replace")
-
-    metadata = {
-        "table_name": table_name,
-        "file_name": file.filename,
-        "columns": list(df.columns),
-        "row_count": len(df)
-    }
-
-    save_dataset_metadata(metadata)
-    DATASETS = load_all_datasets()
-    
-    logger.info(f"Created table {table_name} with {len(df)} rows")
-    return metadata
 
 
 def get_table_info(table_name: str) -> dict:
@@ -270,67 +388,151 @@ def get_table_info(table_name: str) -> dict:
 
 
 @app.post("/ask", tags=["Query"])
-async def ask_question(question: str = Body(...)):
+async def ask_question(
+    question: str = Body(...),
+    dataset_id: int = Body(None, description="Optional dataset ID to query. If not provided, uses the first available dataset.")
+):
     """Ask a natural language question about your data."""
     start_time = time.time()
+    step_times = {}
     
     if not DATASETS:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": "No datasets uploaded. Please upload an Excel file first."}
+            content={"error": "No datasets uploaded. Please upload a file first."}
         )
 
     try:
-        # 1. Select table - skip LLM call if only 1 table exists
-        if len(DATASETS) == 1:
+        # 1. Select table based on dataset_id or use first/only dataset
+        step_start = time.time()
+        if dataset_id is not None:
+            dataset = next((d for d in DATASETS if d.get("id") == dataset_id), None)
+            if not dataset:
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={"error": f"Dataset with ID {dataset_id} not found."}
+                )
+            table = dataset["table_name"]
+            logger.info(f"Using dataset ID {dataset_id}, table: {table}")
+        elif len(DATASETS) == 1:
             table = DATASETS[0]["table_name"]
+            logger.info(f"Single dataset, table: {table}")
         else:
             schema = select_schema(question, DATASETS)
             table = schema["table_name"]
+            logger.info(f"Schema selected, table: {table}")
+        step_times["table_selection"] = round(time.time() - step_start, 3)
+        logger.info(f"⏱️ Step 1 - Table Selection: {step_times['table_selection']}s")
         
         # 2. Get table info (fast DB query)
+        step_start = time.time()
         table_info = get_table_info(table)
+        step_times["table_info_retrieval"] = round(time.time() - step_start, 3)
+        logger.info(f"⏱️ Step 2 - Table Info Retrieval: {step_times['table_info_retrieval']}s")
 
-        # 3. Generate SQL with clear context
+        # 3. Generate SQL with comprehensive context
+        step_start = time.time()
         distinct_section = ""
         if table_info.get('distinct_values'):
-            distinct_section = f"\nDistinct values: {json.dumps(table_info['distinct_values'])}"
+            distinct_section = f"\nKey column values: {json.dumps(table_info['distinct_values'])}"
         
-        sql_prompt = f"""Generate a PostgreSQL SELECT query for this question.
+        sql_prompt = f"""You are a PostgreSQL expert. Generate an accurate SQL query for this question.
 
-Table: {table}
-Columns: {json.dumps(list(table_info['column_types'].keys()))}
-Sample data: {json.dumps(table_info['sample_data'][:5], default=str)}{distinct_section}
+TABLE: {table}
+COLUMNS: {json.dumps(list(table_info['column_types'].keys()))}
+SAMPLE DATA: {json.dumps(table_info['sample_data'][:5], default=str)}{distinct_section}
 
-Question: {question}
+QUERY PATTERNS (use the appropriate pattern):
 
-Return ONLY the SQL query, no explanation."""
+1. RANKING ("what rank is X", "position of X"):
+   CRITICAL: Calculate rank for ALL rows first, then filter OUTSIDE the CTE!
+   WITH ranked AS (
+     SELECT entity, SUM(metric) as total, 
+            ROW_NUMBER() OVER (ORDER BY SUM(metric) DESC) as rank
+     FROM table 
+     GROUP BY entity  -- NO WHERE clause here!
+   ) 
+   SELECT * FROM ranked WHERE entity ILIKE '%search%'  -- Filter AFTER ranking!
+
+2. TOP N ("top 5", "best 10"):
+   SELECT entity, SUM(metric) as total FROM table 
+   GROUP BY entity ORDER BY total DESC LIMIT N
+
+3. COMPARISON ("X vs Y", "compare"):
+   SELECT entity, SUM(metric) as total FROM table 
+   WHERE entity ILIKE '%X%' OR entity ILIKE '%Y%' GROUP BY entity
+
+4. PERCENTAGE ("% of total", "share"):
+   SELECT entity, SUM(metric) as value,
+          ROUND((100.0 * SUM(metric) / (SELECT SUM(metric) FROM table))::numeric, 2) as percentage
+   FROM table GROUP BY entity
+
+5. FILTERING ("in region X", "where"):
+   Use ILIKE '%value%' for text columns, = for exact matches
+
+6. AGGREGATION ("total", "sum", "average", "count"):
+   Use SUM(), AVG(), COUNT(), MIN(), MAX() with GROUP BY
+
+7. TREND ("by month", "over time"):
+   GROUP BY time_column ORDER BY time_column
+
+IMPORTANT PostgreSQL Rules:
+- ROUND with decimals MUST cast to numeric: ROUND(value::numeric, 2) NOT ROUND(value, 2)
+- Always use ::numeric before ROUND when rounding to decimal places
+
+QUESTION: {question}
+
+OUTPUT: Only the SQL query, nothing else."""
         
         sql = extract_sql(llm_call(sql_prompt, max_tokens=500))
+        step_times["sql_generation"] = round(time.time() - step_start, 3)
+        logger.info(f"⏱️ Step 3 - SQL Generation (LLM): {step_times['sql_generation']}s")
         
         # 4. Validate & run SQL
+        step_start = time.time()
         validate_sql(sql)
+        step_times["sql_validation"] = round(time.time() - step_start, 3)
+        logger.info(f"⏱️ Step 4a - SQL Validation: {step_times['sql_validation']}s")
+        
+        step_start = time.time()
         rows, cols = run_sql(sql)
+        step_times["sql_execution"] = round(time.time() - step_start, 3)
+        logger.info(f"⏱️ Step 4b - SQL Execution: {step_times['sql_execution']}s")
 
         # 5. Prepare results
+        step_start = time.time()
         columns_list = list(cols)
         result_data = [dict(zip(columns_list, row)) for row in rows]
+        step_times["result_preparation"] = round(time.time() - step_start, 3)
+        logger.info(f"⏱️ Step 5 - Result Preparation: {step_times['result_preparation']}s")
         
         # 6. Generate answer from query results
-        sample_for_llm = result_data[:10] if len(result_data) > 10 else result_data
+        step_start = time.time()
+        sample_for_llm = result_data[:20]
         
-        answer_prompt = f"""Based on the database query results below, answer the user's question.
+        answer_prompt = f"""Answer the question in natural language based on the query results below.
 
 Question: {question}
 
-Query Results ({len(result_data)} rows):
+Data ({len(result_data)} rows):
 {json.dumps(sample_for_llm, default=str)}
 
-Provide a direct answer using the actual values from the results. Format large numbers in Cr/Lakhs."""
+RESPONSE GUIDELINES:
+1. Start with a brief, friendly sentence answering the question directly
+2. Present data as a simple numbered or bulleted list - DO NOT use markdown tables
+3. Each list item should be clear and readable, like: "April: 87.23 days"
+4. Format values for readability:
+   - Currency/Sales/Revenue: Use Indian format - ₹38.85 Cr (crores), ₹19.49 L (lakhs)
+   - Round decimals to 2 places
+5. Keep the response concise and easy to scan
+6. Do not use markdown table syntax (no | or --- characters)"""
         
-        answer = llm_call(answer_prompt, temperature=0.2, max_tokens=500)
+        answer = llm_call(answer_prompt, temperature=0.1, max_tokens=1000)
+        step_times["answer_generation"] = round(time.time() - step_start, 3)
+        logger.info(f"⏱️ Step 6 - Answer Generation (LLM): {step_times['answer_generation']}s")
         
         duration = time.time() - start_time
+        logger.info(f"⏱️ TOTAL TIME: {round(duration, 2)}s | Breakdown: {step_times}")
 
         return {
             "table_used": table,

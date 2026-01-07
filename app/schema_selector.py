@@ -8,19 +8,6 @@ from app.exceptions import LLMError
 
 
 def select_schema(question: str, metadata: list[dict]) -> dict:
-    """
-    Select the appropriate schema (table and columns) for a question.
-    
-    Args:
-        question: Natural language question
-        metadata: List of available dataset metadata
-        
-    Returns:
-        Dict with table_name and columns
-        
-    Raises:
-        LLMError: If schema selection fails
-    """
     prompt = f"""
 You are a data analyst.
 
