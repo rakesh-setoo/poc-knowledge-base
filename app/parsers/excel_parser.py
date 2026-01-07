@@ -23,17 +23,25 @@ class ExcelParser(BaseParser):
             if progress_callback:
                 await progress_callback(35, "35% - Reading Excel structure...")
             
-            df_raw = pd.read_excel(io.BytesIO(content), header=None)
+            # Try calamine engine first (5-10x faster for large files)
+            try:
+                df_raw = pd.read_excel(io.BytesIO(content), header=None, engine='calamine')
+                engine = 'calamine'
+            except Exception:
+                # Fallback to openpyxl if calamine fails
+                df_raw = pd.read_excel(io.BytesIO(content), header=None, engine='openpyxl')
+                engine = 'openpyxl'
             
             if progress_callback:
-                await progress_callback(42, "42% - Detecting header row...")
+                await progress_callback(42, f"42% - Detecting header row (using {engine})...")
             
             header_row = self._detect_header_row(df_raw)
             
             if progress_callback:
                 await progress_callback(48, "48% - Parsing Excel data...")
             
-            df = pd.read_excel(io.BytesIO(content), header=header_row)
+            # Re-read with detected header using same engine
+            df = pd.read_excel(io.BytesIO(content), header=header_row, engine=engine)
             
             df = self._clean_columns(df)
             
@@ -62,3 +70,4 @@ class ExcelParser(BaseParser):
         df = df.loc[:, ~df.columns.astype(str).str.contains('Unnamed')]
         df = df.dropna(axis=1, how='all')
         return df
+

@@ -30,7 +30,7 @@
 
 /* Container */
 .container {
-  max-width: 1200px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 2rem;
 }
@@ -92,8 +92,13 @@ h1 {
 /* Main Grid */
 .main-grid {
   display: grid;
-  grid-template-columns: 1fr 1.5fr;
+  grid-template-columns: 380px 1fr;
   gap: 2rem;
+}
+
+.right-column {
+  min-width: 0;
+  overflow: hidden;
 }
 
 @media (max-width: 900px) {

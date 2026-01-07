@@ -19,6 +19,7 @@
   border-radius: 16px;
   padding: 1.5rem;
   margin-bottom: 1rem;
+  overflow-x: auto;
 }
 
 .result-label {
@@ -67,10 +68,28 @@
 .result-table-wrapper {
   overflow-x: auto;
   margin-top: 0.75rem;
+  max-width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.result-table-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.result-table-wrapper::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.result-table-wrapper::-webkit-scrollbar-thumb {
+  background: var(--accent-primary);
+  border-radius: 4px;
 }
 
 .result-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.875rem;
 }
@@ -86,12 +105,18 @@
   text-align: left;
   white-space: nowrap;
   border-bottom: 2px solid var(--border-color);
+  position: sticky;
+  top: 0;
 }
 
 .result-table td {
   padding: 0.875rem 1rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   color: var(--text-primary);
+  white-space: nowrap;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .result-table tr:hover td {
@@ -112,9 +137,6 @@
 
 .result-table .name-cell {
   font-weight: 500;
-  max-width: 300px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* Insight Box */

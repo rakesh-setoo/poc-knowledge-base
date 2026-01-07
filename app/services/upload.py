@@ -97,13 +97,15 @@ async def _save_to_database(
     table_name: str, 
     total_rows: int
 ) -> AsyncGenerator[str, None]:
-    if total_rows <= 1000:
+    # Increased threshold and chunk size for faster processing
+    if total_rows <= 5000:
         yield _sse_event(75, "75% - Saving to database...")
         await asyncio.sleep(0.05)
         df.to_sql(table_name, engine, index=False, if_exists="replace")
         yield _sse_event(92, "92% - Database save complete")
     else:
-        chunk_size = max(100, total_rows // 20)
+        # Larger chunks = fewer round trips = faster for big files
+        chunk_size = 10000
         rows_inserted = 0
         
         for i in range(0, total_rows, chunk_size):
@@ -117,7 +119,7 @@ async def _save_to_database(
                 progress, 
                 f"{progress}% - Saving rows {rows_inserted:,}/{total_rows:,}..."
             )
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.01)
 
 
 def _sse_event(progress: int, status: str, error: str = None, result: dict = None) -> str:
