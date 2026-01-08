@@ -35,13 +35,23 @@ function isNumeric(value) {
 function getColumnType(colName) {
   const lower = colName.toLowerCase();
 
-  if (['value', 'amount', 'sales', 'revenue', 'profit', 'cost', 'price', 'total'].some(kw => lower.includes(kw))) {
+  // Check for rank/position columns first (should be plain numbers, not currency)
+  if (['rank', 'position', 'row', 'index'].some(kw => lower.includes(kw))) {
+    return 'id';
+  }
+
+  // Currency columns - includes 'inr' for Indian Rupee columns
+  if (['value', 'amount', 'sales', 'revenue', 'profit', 'cost', 'price', 'total', 'inr'].some(kw => lower.includes(kw))) {
+    // Exclude if it's a rank/percentage column that happens to have these words
+    if (['rank', 'percent', 'pct', '%'].some(kw => lower.includes(kw))) {
+      return 'default';
+    }
     return 'currency';
   }
   if (['id', 'code', 'number', 'no', 'invoice'].some(kw => lower.includes(kw))) {
     return 'id';
   }
-  if (['percent', 'pct', 'rate', 'ratio'].some(kw => lower.includes(kw))) {
+  if (['percent', 'pct', 'rate', 'ratio', 'percentage'].some(kw => lower.includes(kw))) {
     return 'percent';
   }
   if (['count', 'qty', 'quantity'].some(kw => lower.includes(kw))) {

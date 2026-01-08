@@ -88,8 +88,8 @@
 }
 
 .result-table {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.875rem;
 }
@@ -107,6 +107,16 @@
   border-bottom: 2px solid var(--border-color);
   position: sticky;
   top: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* First column (rank #) - fixed narrow width */
+.result-table th:first-child,
+.result-table td:first-child {
+  width: 60px;
+  min-width: 60px;
+  text-align: center;
 }
 
 .result-table td {
@@ -126,7 +136,7 @@
 .result-table .rank-cell {
   color: var(--accent-secondary);
   font-weight: 600;
-  width: 50px;
+  text-align: center;
 }
 
 .result-table .number-cell {
@@ -135,8 +145,15 @@
   text-align: right;
 }
 
+/* Header alignment for number columns */
+.result-table th.number-header {
+  text-align: right;
+}
+
 .result-table .name-cell {
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Insight Box */

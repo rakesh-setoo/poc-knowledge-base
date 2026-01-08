@@ -129,7 +129,12 @@ function renderDataTable(columns, data) {
     return '<p style="color: var(--text-muted); text-align: center; padding: 1rem;">No results found</p>';
   }
 
-  const headers = columns.map(col => `<th>${escapeHtml(formatColumnName(col))}</th>`).join('');
+  // Determine if each column is numeric by checking first row values
+  const headers = columns.map(col => {
+    const firstRowValue = data[0][col];
+    const headerClass = isNumeric(firstRowValue) ? 'number-header' : '';
+    return `<th class="${headerClass}">${escapeHtml(formatColumnName(col))}</th>`;
+  }).join('');
 
   const rows = data.map((row, index) => {
     const cells = columns.map(col => {
