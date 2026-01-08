@@ -88,8 +88,8 @@
 }
 
 .result-table {
-  width: 100%;
-  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.875rem;
 }
@@ -107,8 +107,6 @@
   border-bottom: 2px solid var(--border-color);
   position: sticky;
   top: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* First column (rank #) - fixed narrow width */
@@ -124,9 +122,6 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   color: var(--text-primary);
   white-space: nowrap;
-  max-width: 400px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .result-table tr:hover td {
@@ -187,4 +182,63 @@
   border-radius: 20px;
   font-size: 0.8125rem;
   font-weight: 500;
+}
+
+/* Streaming cursor animation */
+.streaming-cursor {
+  display: inline-block;
+  color: var(--accent-primary);
+  animation: blink 0.8s infinite;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+
+  0%,
+  50% {
+    opacity: 1;
+  }
+
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Pagination controls */
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.pagination-btn {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+.pagination-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pagination-info {
+  color: var(--text-muted);
+  font-size: 0.875rem;
 }

@@ -113,16 +113,17 @@ OUTPUT: Only the SQL query, nothing else."""
 
 def build_answer_prompt(question: str, result_data: list) -> str:
     """Build the prompt for answer generation."""
-    sample = result_data[:20]
+    sample = result_data[:10]  # Reduced from 20 for faster processing
     
+    # return f"""Answer concisely based on the data below.
     return f"""Answer the question in natural language based on the query results below.
 
 Question: {question}
 
 Data ({len(result_data)} rows):
-{json.dumps(sample, default=str)}
+{json.dumps(sample, default=str)}   
 
-RESPONSE GUIDELINES:
+    RESPONSE GUIDELINES:
 1. Start with a brief, friendly sentence answering the question directly
 2. Present data as a simple numbered or bulleted list - DO NOT use markdown tables
 3. Each list item should be clear and readable, like: "April: 87.23 days"
@@ -131,6 +132,12 @@ RESPONSE GUIDELINES:
    - Round decimals to 2 places
 5. Keep the response concise and easy to scan
 6. Do not use markdown table syntax (no | or --- characters)"""
+
+# Rules:
+# - Start with 1 sentence answering the question
+# - List key data points briefly
+# - Use ₹ Cr/L for currency (Indian format)
+# - No markdown tables"""
 
 
 def select_table(question: str, datasets: list, dataset_id: int = None) -> str:

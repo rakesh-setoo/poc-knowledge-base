@@ -1,12 +1,13 @@
 import time
+import json
 from fastapi import APIRouter, Body
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.routers.datasets import get_datasets
 from app.services.query import (
     get_table_info, build_sql_prompt, build_answer_prompt, select_table
 )
-from app.core.llm import llm_call
+from app.core.llm import llm_call, llm_call_stream
 from app.utils.sql_utils import validate_sql, run_sql, extract_sql
 from app.schemas import AskResponse
 from app.logging import NoDatasetError, SQLValidationError, SQLExecutionError, LLMError, logger
@@ -121,3 +122,82 @@ async def ask_question(
     except Exception as e:
         logger.exception(f"Unexpected query error: {str(e)}")
         return error_response(str(e), generated_sql, table_used)
+
+
+@router.post("/ask-stream")
+async def ask_question_stream(
+    question: str = Body(...),
+    dataset_id: int = Body(None, description="Optional dataset ID to query")
+):
+    """Streaming endpoint that sends data immediately, then streams the answer."""
+    
+    def generate():
+        start_time = time.time()
+        generated_sql = None
+        table_used = None
+        
+        try:
+            # Phase 1-7: Same as non-streaming endpoint
+            datasets = get_datasets()
+            if not datasets:
+                yield f"data: {json.dumps({'error': 'No datasets available'})}\n\n"
+                return
+            
+            table_used = select_table(question, datasets, dataset_id)
+            table_info = get_table_info(table_used)
+            
+            sql_prompt = build_sql_prompt(question, table_used, table_info)
+            generated_sql = llm_call(sql_prompt)
+            generated_sql = extract_sql(generated_sql)
+            
+            try:
+                validated_sql = validate_sql(generated_sql)
+            except SQLValidationError as e:
+                logger.error(f"SQL validation error: {e}")
+                yield f"data: {json.dumps({'error': 'Something went wrong. Please try again.'})}\n\n"
+                return
+            
+            try:
+                rows, columns = run_sql(validated_sql)
+            except SQLExecutionError as e:
+                logger.error(f"SQL execution error: {e}")
+                yield f"data: {json.dumps({'error': 'Something went wrong. Please try again.'})}\n\n"
+                return
+            
+            result_data = [dict(zip(columns, row)) for row in rows]
+            
+            # Send metadata immediately (table, SQL, columns, data)
+            metadata = {
+                "type": "metadata",
+                "table_used": table_used,
+                "generated_sql": validated_sql,
+                "columns": columns,
+                "data": result_data,
+                "row_count": len(result_data)
+            }
+            yield f"data: {json.dumps(metadata, default=str)}\n\n"
+            
+            # Phase 8: Stream answer generation
+            answer_prompt = build_answer_prompt(question, result_data)
+            
+            for token in llm_call_stream(answer_prompt):
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+            
+            # Signal completion
+            elapsed = time.time() - start_time
+            logger.info(f"[TIMING] STREAM TOTAL: {elapsed:.2f}s for query: {question[:50]}...")
+            yield f"data: {json.dumps({'type': 'done', 'elapsed': round(elapsed, 2)})}\n\n"
+            
+        except Exception as e:
+            logger.exception(f"Stream error: {str(e)}")
+            yield f"data: {json.dumps({'error': 'Something went wrong. Please try again.'})}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
