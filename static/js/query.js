@@ -66,9 +66,11 @@ async function askQuestion() {
 
     loading.classList.remove('show');
     results.classList.add('show');
+    // Log actual error to console, show generic message to user
+    console.error('Connection error:', error);
     results.innerHTML = `
       <div class="result-error">
-        <strong>Connection Error:</strong> ${error.message}
+        <strong>⚠️ Oops!</strong> Something went wrong. Please try again.
       </div>
     `;
   }
@@ -80,10 +82,11 @@ async function askQuestion() {
  * Render error response
  */
 function renderError(container, data) {
+  // Show generic error message to user (detailed error is logged in backend terminal)
+  console.error('Query error:', data.error);
   container.innerHTML = `
     <div class="result-error">
-      <strong>Error:</strong> ${data.error}
-      ${data.generated_sql ? `<div class="result-sql" style="margin-top: 1rem;">${data.generated_sql}</div>` : ''}
+      <strong>⚠️ Oops!</strong> ${data.error}
     </div>
   `;
 }

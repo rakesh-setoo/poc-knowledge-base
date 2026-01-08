@@ -7,6 +7,7 @@ import pandas as pd
 from app.db import engine, save_dataset_metadata
 from app.parsers import get_parser, ParserRegistry
 from app.logging import logger
+from app.utils import infer_column_types, convert_date_columns
 
 
 async def process_upload_with_progress(
@@ -44,19 +45,33 @@ async def process_upload_with_progress(
         await asyncio.sleep(0.05)
         
         df = _clean_column_names(df)
+        
+        # Replace empty strings with None (becomes NULL in database)
+        df = df.replace(r'^\s*$', None, regex=True)
+        
         total_rows = len(df)
         
         yield _sse_event(60, f"60% - Data cleaned ({total_rows:,} rows)")
         await asyncio.sleep(0.05)
         
-        # Phase 4: Save to database (60-92%)
+        # Phase 4: Infer column types (60-65%)
+        yield _sse_event(62, "62% - Analyzing column types...")
+        await asyncio.sleep(0.05)
+        
+        dtype_map = infer_column_types(df)
+        df = convert_date_columns(df, dtype_map)
+        
+        yield _sse_event(65, "65% - Column types optimized")
+        await asyncio.sleep(0.05)
+        
+        # Phase 5: Save to database (65-92%)
         file_type = parser.name.lower()
         table_name = f"dataset_{uuid.uuid4().hex[:8]}"
         
-        async for event in _save_to_database(df, table_name, total_rows):
+        async for event in _save_to_database(df, table_name, total_rows, dtype_map):
             yield event
         
-        # Phase 5: Save metadata (95-100%)
+        # Phase 6: Save metadata (95-100%)
         yield _sse_event(95, "95% - Saving metadata...")
         await asyncio.sleep(0.05)
         
@@ -95,13 +110,23 @@ def _clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
 async def _save_to_database(
     df: pd.DataFrame, 
     table_name: str, 
-    total_rows: int
+    total_rows: int,
+    dtype_map: dict = None
 ) -> AsyncGenerator[str, None]:
-    # Increased threshold and chunk size for faster processing
+    """Save DataFrame to database with proper column types."""
+    # Use inferred types if provided
+    sql_kwargs = {
+        "name": table_name,
+        "con": engine,
+        "index": False,
+    }
+    if dtype_map:
+        sql_kwargs["dtype"] = dtype_map
+    
     if total_rows <= 5000:
-        yield _sse_event(75, "75% - Saving to database...")
+        yield _sse_event(78, "78% - Saving to database...")
         await asyncio.sleep(0.05)
-        df.to_sql(table_name, engine, index=False, if_exists="replace")
+        df.to_sql(**sql_kwargs, if_exists="replace")
         yield _sse_event(92, "92% - Database save complete")
     else:
         # Larger chunks = fewer round trips = faster for big files
@@ -111,10 +136,10 @@ async def _save_to_database(
         for i in range(0, total_rows, chunk_size):
             chunk_df = df.iloc[i:i + chunk_size]
             if_exists = "replace" if i == 0 else "append"
-            chunk_df.to_sql(table_name, engine, index=False, if_exists=if_exists)
+            chunk_df.to_sql(**sql_kwargs, if_exists=if_exists)
             
             rows_inserted += len(chunk_df)
-            progress = 60 + int((rows_inserted / total_rows) * 32)
+            progress = 65 + int((rows_inserted / total_rows) * 27)
             yield _sse_event(
                 progress, 
                 f"{progress}% - Saving rows {rows_inserted:,}/{total_rows:,}..."

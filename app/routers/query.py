@@ -16,12 +16,18 @@ router = APIRouter(tags=["Query"])
 
 
 def error_response(error: str, generated_sql: str = None, table_used: str = None):
+    # Log the actual error to terminal for debugging
+    logger.error(f"Backend error: {error}")
+    if generated_sql:
+        logger.error(f"Generated SQL: {generated_sql}")
+    if table_used:
+        logger.error(f"Table used: {table_used}")
+    
+    # Return generic message to frontend
     return JSONResponse(
         status_code=400,
         content={
-            "error": error,
-            "generated_sql": generated_sql,
-            "table_used": table_used
+            "error": "Something went wrong. Please try again."
         }
     )
 
@@ -36,37 +42,62 @@ async def ask_question(
     table_used = None
     
     try:
+        # Phase 1: Fetch datasets
+        phase_start = time.time()
         datasets = get_datasets()
+        logger.info(f"[TIMING] Phase 1 - Dataset fetch: {(time.time() - phase_start):.2f}s")
         logger.info(f"Received query: '{question}' for dataset_id: {dataset_id}")
         
         if not datasets:
             raise NoDatasetError()
         
+        # Phase 2: Table selection
+        phase_start = time.time()
         table_used = select_table(question, datasets, dataset_id)
+        logger.info(f"[TIMING] Phase 2 - Table selection: {(time.time() - phase_start):.2f}s")
         
+        # Phase 3: Get table info
+        phase_start = time.time()
         table_info = get_table_info(table_used)
+        logger.info(f"[TIMING] Phase 3 - Table info retrieval: {(time.time() - phase_start):.2f}s")
         
+        # Phase 4: Build SQL prompt and generate SQL
+        phase_start = time.time()
         sql_prompt = build_sql_prompt(question, table_used, table_info)
         generated_sql = llm_call(sql_prompt)
-        generated_sql = extract_sql(generated_sql)
+        logger.info(f"[TIMING] Phase 4 - SQL generation (LLM): {(time.time() - phase_start):.2f}s")
         
+        # Phase 5: Extract SQL
+        phase_start = time.time()
+        generated_sql = extract_sql(generated_sql)
+        logger.info(f"[TIMING] Phase 5 - SQL extraction: {(time.time() - phase_start):.2f}s")
+        
+        # Phase 6: Validate SQL
+        phase_start = time.time()
         try:
             validated_sql = validate_sql(generated_sql)
+            logger.info(f"[TIMING] Phase 6 - SQL validation: {(time.time() - phase_start):.2f}s")
         except SQLValidationError as e:
             return error_response(str(e), generated_sql, table_used)
         
+        # Phase 7: Execute SQL
+        phase_start = time.time()
         try:
             rows, columns = run_sql(validated_sql)
+            logger.info(f"[TIMING] Phase 7 - SQL execution: {(time.time() - phase_start):.2f}s")
         except SQLExecutionError as e:
             return error_response(str(e), generated_sql, table_used)
         
         result_data = [dict(zip(columns, row)) for row in rows]
         
+        # Phase 8: Generate answer
+        phase_start = time.time()
         answer_prompt = build_answer_prompt(question, result_data)
         answer = llm_call(answer_prompt)
+        logger.info(f"[TIMING] Phase 8 - Answer generation (LLM): {(time.time() - phase_start):.2f}s")
         
         elapsed = time.time() - start_time
-        logger.info(f"Query completed in {elapsed:.2f}s: {question[:50]}...")
+        logger.info(f"[TIMING] TOTAL: {elapsed:.2f}s for query: {question[:50]}...")
         
         return AskResponse(
             table_used=table_used,
@@ -88,5 +119,5 @@ async def ask_question(
     except LLMError as e:
         return error_response(str(e), generated_sql, table_used)
     except Exception as e:
-        logger.error(f"Query error: {str(e)}")
-        return error_response(f"An unexpected error occurred: {str(e)}", generated_sql, table_used)
+        logger.exception(f"Unexpected query error: {str(e)}")
+        return error_response(str(e), generated_sql, table_used)

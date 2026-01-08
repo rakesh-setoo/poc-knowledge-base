@@ -54,10 +54,14 @@ def build_sql_prompt(question: str, table: str, table_info: dict) -> str:
     if table_info.get('distinct_values'):
         distinct_section = f"\nKey column values: {json.dumps(table_info['distinct_values'])}"
     
+    # Format columns with their types for better SQL generation
+    column_types = table_info['column_types']
+    columns_formatted = ", ".join([f"{col} ({dtype})" for col, dtype in column_types.items()])
+    
     return f"""You are a PostgreSQL expert. Generate an accurate SQL query for this question.
 
 TABLE: {table}
-COLUMNS: {json.dumps(list(table_info['column_types'].keys()))}
+COLUMNS (with types): {columns_formatted}
 SAMPLE DATA: {json.dumps(table_info['sample_data'][:5], default=str)}{distinct_section}
 
 QUERY PATTERNS (use the appropriate pattern):
@@ -90,13 +94,17 @@ QUERY PATTERNS (use the appropriate pattern):
 
 6. AGGREGATION ("total", "sum", "average", "count"):
    Use SUM(), AVG(), COUNT(), MIN(), MAX() with GROUP BY
+   IMPORTANT: For numeric columns, use them directly - no casting needed!
+   Example: AVG(numeric_column), not NULLIF(column,'')::numeric
 
 7. TREND ("by month", "over time"):
    GROUP BY time_column ORDER BY time_column
 
 IMPORTANT PostgreSQL Rules:
 - ROUND with decimals MUST cast to numeric: ROUND(value::numeric, 2) NOT ROUND(value, 2)
-- Always use ::numeric before ROUND when rounding to decimal places
+- For already numeric columns, just use: ROUND(AVG(column)::numeric, 2)
+- Do NOT use NULLIF or empty string checks on numeric columns - they already handle NULL properly
+- Only use NULLIF for TEXT columns that might have empty strings
 
 QUESTION: {question}
 
