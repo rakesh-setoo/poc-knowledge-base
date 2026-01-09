@@ -44,8 +44,12 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = Field(default=False, description="Enable rate limiting")
     rate_limit_requests: int = Field(default=100, description="Max requests per minute")
     
-    # Redis (for conversation history)
-    redis_url: Optional[str] = Field(default=None, description="Redis connection URL (optional)")
+    # Redis (for conversation history) - accept both uppercase and lowercase
+    redis_url: Optional[str] = Field(
+        default=None, 
+        validation_alias=AliasChoices('redis_url', 'REDIS_URL'),
+        description="Redis connection URL (optional)"
+    )
     
     @property
     def cors_origins_list(self) -> list[str]:
