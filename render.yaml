@@ -1,0 +1,32 @@
+databases:
+  - name: millenium-postgres
+    plan: free
+    databaseName: millenium_ai
+    user: millenium
+
+services:
+  # Redis
+  - type: redis
+    name: millenium-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
+
+  # Main Web App
+  - type: web
+    name: millenium-ai
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: millenium-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: millenium-redis
+          type: redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false # You'll set this manually in Render dashboard
+    healthCheckPath: /health
