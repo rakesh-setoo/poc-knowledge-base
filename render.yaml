@@ -10,6 +10,7 @@ services:
     name: millenium-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
+    ipAllowList: [] # Allow all connections (required by Render)
 
   # Main Web App
   - type: web
@@ -28,5 +29,5 @@ services:
           type: redis
           property: connectionString
       - key: OPENAI_API_KEY
-        sync: false # You'll set this manually in Render dashboard
+        sync: false
     healthCheckPath: /health
