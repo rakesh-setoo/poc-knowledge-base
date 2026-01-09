@@ -7,6 +7,9 @@ from app.routers.datasets import get_datasets
 from app.services.query import (
     get_table_info, build_sql_prompt, build_answer_prompt, select_table
 )
+from app.services.conversation import add_to_history, format_history_for_prompt
+from app.services.chat import add_message, get_messages, create_chat, auto_generate_title, get_chat
+from app.services.settings import get_global_system_prompt
 from app.core.llm import llm_call, llm_call_stream
 from app.utils.sql_utils import validate_sql, run_sql, extract_sql
 from app.schemas import AskResponse
@@ -17,7 +20,6 @@ router = APIRouter(tags=["Query"])
 
 
 def error_response(error: str, generated_sql: str = None, table_used: str = None):
-    # Log the actual error to terminal for debugging
     logger.error(f"Backend error: {error}")
     if generated_sql:
         logger.error(f"Generated SQL: {generated_sql}")
@@ -33,132 +35,101 @@ def error_response(error: str, generated_sql: str = None, table_used: str = None
     )
 
 
-@router.post("/ask", response_model=AskResponse)
-async def ask_question(
-    question: str = Body(...),
-    dataset_id: int = Body(None, description="Optional dataset ID to query")
-):
-    start_time = time.time()
-    generated_sql = None
-    table_used = None
-    
-    try:
-        # Phase 1: Fetch datasets
-        phase_start = time.time()
-        datasets = get_datasets()
-        logger.info(f"[TIMING] Phase 1 - Dataset fetch: {(time.time() - phase_start):.2f}s")
-        logger.info(f"Received query: '{question}' for dataset_id: {dataset_id}")
-        
-        if not datasets:
-            raise NoDatasetError()
-        
-        # Phase 2: Table selection
-        phase_start = time.time()
-        table_used = select_table(question, datasets, dataset_id)
-        logger.info(f"[TIMING] Phase 2 - Table selection: {(time.time() - phase_start):.2f}s")
-        
-        # Phase 3: Get table info
-        phase_start = time.time()
-        table_info = get_table_info(table_used)
-        logger.info(f"[TIMING] Phase 3 - Table info retrieval: {(time.time() - phase_start):.2f}s")
-        
-        # Phase 4: Build SQL prompt and generate SQL
-        phase_start = time.time()
-        sql_prompt = build_sql_prompt(question, table_used, table_info)
-        generated_sql = llm_call(sql_prompt)
-        logger.info(f"[TIMING] Phase 4 - SQL generation (LLM): {(time.time() - phase_start):.2f}s")
-        
-        # Phase 5: Extract SQL
-        phase_start = time.time()
-        generated_sql = extract_sql(generated_sql)
-        logger.info(f"[TIMING] Phase 5 - SQL extraction: {(time.time() - phase_start):.2f}s")
-        
-        # Phase 6: Validate SQL
-        phase_start = time.time()
-        try:
-            validated_sql = validate_sql(generated_sql)
-            logger.info(f"[TIMING] Phase 6 - SQL validation: {(time.time() - phase_start):.2f}s")
-        except SQLValidationError as e:
-            return error_response(str(e), generated_sql, table_used)
-        
-        # Phase 7: Execute SQL
-        phase_start = time.time()
-        try:
-            rows, columns = run_sql(validated_sql)
-            logger.info(f"[TIMING] Phase 7 - SQL execution: {(time.time() - phase_start):.2f}s")
-        except SQLExecutionError as e:
-            return error_response(str(e), generated_sql, table_used)
-        
-        result_data = [dict(zip(columns, row)) for row in rows]
-        
-        # Phase 8: Generate answer
-        phase_start = time.time()
-        answer_prompt = build_answer_prompt(question, result_data)
-        answer = llm_call(answer_prompt)
-        logger.info(f"[TIMING] Phase 8 - Answer generation (LLM): {(time.time() - phase_start):.2f}s")
-        
-        elapsed = time.time() - start_time
-        logger.info(f"[TIMING] TOTAL: {elapsed:.2f}s for query: {question[:50]}...")
-        
-        return AskResponse(
-            table_used=table_used,
-            generated_sql=validated_sql,
-            answer=answer,
-            columns=columns,
-            data=result_data,
-            row_count=len(result_data)
-        )
-        
-    except NoDatasetError:
-        raise
-    except ValueError as e:
-        return error_response(str(e), generated_sql, table_used)
-    except SQLValidationError as e:
-        return error_response(str(e), generated_sql, table_used)
-    except SQLExecutionError as e:
-        return error_response(str(e), generated_sql, table_used)
-    except LLMError as e:
-        return error_response(str(e), generated_sql, table_used)
-    except Exception as e:
-        logger.exception(f"Unexpected query error: {str(e)}")
-        return error_response(str(e), generated_sql, table_used)
-
 
 @router.post("/ask-stream")
 async def ask_question_stream(
     question: str = Body(...),
-    dataset_id: int = Body(None, description="Optional dataset ID to query")
+    dataset_id: int = Body(None, description="Optional dataset ID to query"),
+    chat_id: int = Body(None, description="Optional chat ID for conversation")
 ):
     """Streaming endpoint that sends data immediately, then streams the answer."""
     
     def generate():
+        nonlocal chat_id
         start_time = time.time()
         generated_sql = None
         table_used = None
+        is_first_message = False
         
         try:
-            # Phase 1-7: Same as non-streaming endpoint
+            # Create new chat if not provided
+            chat_system_prompt = None
+            if not chat_id:
+                chat = create_chat(dataset_id=dataset_id)
+                chat_id = chat["id"]
+                is_first_message = True
+                chat_system_prompt = chat.get("system_prompt")
+                logger.info(f"[STREAM] Created new chat: {chat_id}")
+            else:
+                # Fetch existing chat to get system_prompt
+                chat = get_chat(chat_id)
+                if chat:
+                    chat_system_prompt = chat.get("system_prompt")
+            
+            # Fetch global system prompt and combine
+            global_prompt = get_global_system_prompt()
+            
+            # Combine prompts: Global first, then Chat specific (which can override)
+            system_prompt = ""
+            if global_prompt:
+                system_prompt += f"GLOBAL INSTRUCTIONS:\n{global_prompt}\n\n"
+            if chat_system_prompt:
+                system_prompt += f"CHAT SPECIFIC INSTRUCTIONS:\n{chat_system_prompt}"
+            
+            system_prompt = system_prompt.strip() or None
+            
+            # Save user message to chat
+            add_message(chat_id, "user", question)
+            
+            # Phase 1: Fetch datasets
+            phase_start = time.time()
             datasets = get_datasets()
+            logger.info(f"[STREAM TIMING] Phase 1 - Dataset fetch: {(time.time() - phase_start):.2f}s")
+            logger.info(f"[STREAM] Received query: '{question}' for dataset_id: {dataset_id}, chat_id: {chat_id}")
+            
             if not datasets:
                 yield f"data: {json.dumps({'error': 'No datasets available'})}\n\n"
                 return
             
+            # Phase 2: Table selection
+            phase_start = time.time()
             table_used = select_table(question, datasets, dataset_id)
+            logger.info(f"[STREAM TIMING] Phase 2 - Table selection: {(time.time() - phase_start):.2f}s")
+            
+            # Phase 3: Get table info
+            phase_start = time.time()
             table_info = get_table_info(table_used)
+            logger.info(f"[STREAM TIMING] Phase 3 - Table info retrieval: {(time.time() - phase_start):.2f}s")
             
-            sql_prompt = build_sql_prompt(question, table_used, table_info)
-            generated_sql = llm_call(sql_prompt)
+            # Get conversation history for context (uses chat_id for isolation)
+            history_context = format_history_for_prompt(chat_id) if chat_id else ""
+            
+            # Phase 4: Build SQL prompt and generate SQL (with conversation context for follow-up questions)
+            phase_start = time.time()
+            sql_prompt = build_sql_prompt(question, table_used, table_info, history_context)
+            generated_sql = llm_call(sql_prompt, max_tokens=1500)
+            logger.info(f"[STREAM TIMING] Phase 4 - SQL generation (LLM): {(time.time() - phase_start):.2f}s")
+            
+            # Phase 5: Extract SQL
+            phase_start = time.time()
             generated_sql = extract_sql(generated_sql)
+            logger.info(f"[STREAM TIMING] Phase 5 - SQL extraction: {(time.time() - phase_start):.2f}s")
             
+            # Phase 6: Validate SQL
+            phase_start = time.time()
             try:
                 validated_sql = validate_sql(generated_sql)
+                logger.info(f"[STREAM TIMING] Phase 6 - SQL validation: {(time.time() - phase_start):.2f}s")
             except SQLValidationError as e:
                 logger.error(f"SQL validation error: {e}")
                 yield f"data: {json.dumps({'error': 'Something went wrong. Please try again.'})}\n\n"
                 return
             
+            # Phase 7: Execute SQL
+            phase_start = time.time()
             try:
                 rows, columns = run_sql(validated_sql)
+                logger.info(f"[STREAM TIMING] Phase 7 - SQL execution: {(time.time() - phase_start):.2f}s")
             except SQLExecutionError as e:
                 logger.error(f"SQL execution error: {e}")
                 yield f"data: {json.dumps({'error': 'Something went wrong. Please try again.'})}\n\n"
@@ -166,9 +137,10 @@ async def ask_question_stream(
             
             result_data = [dict(zip(columns, row)) for row in rows]
             
-            # Send metadata immediately (table, SQL, columns, data)
+            # Send metadata immediately (table, SQL, columns, data, chat_id)
             metadata = {
                 "type": "metadata",
+                "chat_id": chat_id,
                 "table_used": table_used,
                 "generated_sql": validated_sql,
                 "columns": columns,
@@ -176,17 +148,43 @@ async def ask_question_stream(
                 "row_count": len(result_data)
             }
             yield f"data: {json.dumps(metadata, default=str)}\n\n"
+            logger.info(f"[STREAM TIMING] Metadata sent - {len(result_data)} rows, chat_id: {chat_id}")
             
-            # Phase 8: Stream answer generation
-            answer_prompt = build_answer_prompt(question, result_data)
+            # Phase 8: Stream answer generation with conversation history
+            phase_start = time.time()
             
+            # Build answer prompt with optional custom system instructions
+            answer_prompt = build_answer_prompt(question, result_data, history_context, system_prompt)
+            
+            token_count = 0
+            full_answer = []  # Collect answer for history storage
             for token in llm_call_stream(answer_prompt):
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                full_answer.append(token)
+                token_count += 1
+            
+            # Store this Q&A in conversation history for future context (uses chat_id)
+            answer_text = "".join(full_answer)
+            if chat_id:
+                add_to_history(chat_id, question, answer_text)
+            
+            # Save assistant message to database
+            add_message(chat_id, "assistant", answer_text, {
+                "table_used": table_used,
+                "generated_sql": validated_sql,
+                "row_count": len(result_data)
+            })
+            
+            # Auto-generate title from first question
+            if is_first_message:
+                auto_generate_title(chat_id, question)
+            
+            logger.info(f"[STREAM TIMING] Phase 8 - Answer generation (LLM): {(time.time() - phase_start):.2f}s ({token_count} tokens)")
             
             # Signal completion
             elapsed = time.time() - start_time
-            logger.info(f"[TIMING] STREAM TOTAL: {elapsed:.2f}s for query: {question[:50]}...")
-            yield f"data: {json.dumps({'type': 'done', 'elapsed': round(elapsed, 2)})}\n\n"
+            logger.info(f"[STREAM TIMING] TOTAL: {elapsed:.2f}s for query: {question[:50]}...")
+            yield f"data: {json.dumps({'type': 'done', 'chat_id': chat_id, 'elapsed': round(elapsed, 2)})}\n\n"
             
         except Exception as e:
             logger.exception(f"Stream error: {str(e)}")

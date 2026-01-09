@@ -1,9 +1,3 @@
-"""
-Smart column type inference for PostgreSQL.
-
-Analyzes DataFrame columns to determine optimal PostgreSQL data types
-by examining both column names and actual data values.
-"""
 import re
 import warnings
 from typing import Any
@@ -12,9 +6,6 @@ from sqlalchemy import BigInteger, Boolean, Date, DateTime, Numeric, String, Tex
 
 from app.logging import logger
 
-
-# Column name patterns that suggest date types (use word boundaries to avoid false matches)
-# These patterns are used as HINTS - data must still be validated as actual dates
 DATE_COLUMN_PATTERNS = [
     r'\bdate\b', r'_dt$', r'_date$', r'^date_', r'^dt_',
     r'\bcreated\b', r'\bupdated\b', r'\bmodified\b',
@@ -46,17 +37,6 @@ DATETIME_FORMATS = [
 
 
 def infer_column_types(df: pd.DataFrame) -> dict[str, Any]:
-    """
-    Analyze DataFrame and return SQLAlchemy type mapping for each column.
-    
-    Checks:
-    1. Column name patterns (e.g., 'date', '_at', 'created')
-    2. Actual data values in the column
-    3. Data characteristics (length for strings, range for numbers)
-    
-    Returns:
-        dict mapping column names to SQLAlchemy types
-    """
     dtype_map = {}
     
     for column in df.columns:
@@ -68,13 +48,10 @@ def infer_column_types(df: pd.DataFrame) -> dict[str, Any]:
 
 
 def _infer_single_column_type(series: pd.Series, column_name: str) -> Any:
-    """Infer the best PostgreSQL type for a single column."""
-    
-    # Drop null values for analysis
     non_null = series.dropna()
     
     if len(non_null) == 0:
-        return Text()  # Empty column, default to TEXT
+        return Text()  
     
     # Check if already datetime
     if pd.api.types.is_datetime64_any_dtype(series):
@@ -93,11 +70,6 @@ def _infer_single_column_type(series: pd.Series, column_name: str) -> Any:
     
     # For object dtype (strings), do deeper analysis
     if series.dtype == 'object':
-        # Note: Boolean string detection (Yes/No) is disabled - too error-prone
-        # Values like 'Yes'/'No' will remain as VARCHAR
-        
-        # Check for date/datetime
-        # Name hint alone is NOT enough - must verify data actually contains dates
         is_likely_date_by_name = _should_check_for_date(column_name)
         is_date_by_data = _is_date_column(non_null)
         
@@ -133,15 +105,9 @@ def _should_check_for_date(column_name: str) -> bool:
 
 
 def _is_date_column(series: pd.Series) -> bool:
-    """
-    Check if a string column contains date values by sampling and parsing.
-    Uses sampling for performance on large datasets.
-    """
-    # Sample up to 100 values for testing
     sample_size = min(100, len(series))
     sample = series.sample(n=sample_size, random_state=42) if len(series) > sample_size else series
     
-    # Need at least 80% to parse as dates
     success_threshold = 0.8
     
     for fmt in DATE_FORMATS + DATETIME_FORMATS:

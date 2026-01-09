@@ -29,3 +29,6 @@ pydantic==2.5.3
 
 # Logging (optional enhancements)
 # structlog==24.1.0
+
+# Redis (for conversation history)
+redis==5.0.1

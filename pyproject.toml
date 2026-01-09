@@ -3,9 +3,10 @@ name = "excel-ai-poc"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.128.0",
+    "gunicorn>=23.0.0",
     "openai>=2.14.0",
     "openpyxl>=3.1.5",
     "pandas>=2.3.3",
@@ -14,6 +15,7 @@ dependencies = [
     "python-calamine>=0.6.1",
     "python-dotenv>=1.2.1",
     "python-multipart>=0.0.21",
+    "redis>=7.1.0",
     "sqlalchemy>=2.0.45",
     "sqlglot>=28.5.0",
     "uvicorn>=0.40.0",

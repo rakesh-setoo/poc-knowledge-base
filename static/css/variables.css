@@ -14,6 +14,11 @@
   --accent-secondary: #8b5cf6;
   --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a855f7 100%);
 
+  /* Primary colors for chat */
+  --primary: #6366f1;
+  --primary-dark: #8b5cf6;
+  --primary-rgb: 99, 102, 241;
+
   /* Text colors */
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;

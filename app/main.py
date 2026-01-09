@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.core.config import settings
 from app.db import init_metadata_table, load_all_datasets
 from app.logging import logger, AppException
-from app.routers import health, datasets, query
+from app.routers import health, datasets, query, chat, settings as settings_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -114,3 +114,9 @@ app.include_router(datasets.upload_router)
 
 # Query endpoint
 app.include_router(query.router)
+
+# Chat management
+app.include_router(chat.router)
+
+# Settings
+app.include_router(settings_router.router)

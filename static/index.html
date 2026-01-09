@@ -18,121 +18,177 @@
   <link rel="stylesheet" href="/static/css/upload.css">
   <link rel="stylesheet" href="/static/css/results.css">
   <link rel="stylesheet" href="/static/css/utilities.css">
+  <link rel="stylesheet" href="/static/css/chat.css">
 </head>
 
 <body>
   <div class="bg-gradient"></div>
   <div class="toast-container" id="toastContainer"></div>
 
-  <div class="container">
-    <header>
-      <div class="logo">
-        <div class="logo-icon"><img src="/static/images/millenium_favicon.png" alt="Logo"
-            style="width: 100%; height: 100%; object-fit: contain; border-radius: 8px;"></div>
-        <h1>Millenium<br>Semiconductors AI</h1>
-      </div>
-      <p class="tagline">Upload your Excel/CSV files and ask questions in natural language</p>
-    </header>
-
-    <div class="main-grid">
-      <!-- Left Column -->
-      <div class="left-column">
-        <!-- Upload Card -->
-        <div class="card" style="margin-bottom: 1.5rem;">
-          <h2 class="card-title">
-            <span class="icon">📤</span>
-            Upload Data
-          </h2>
-          <div class="upload-zone" id="uploadZone">
-            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
-            <span class="upload-icon">📁</span>
-            <p class="upload-text">Drop your file here or click to browse</p>
-            <p class="upload-hint">Supports .xlsx, .xls, and .csv files</p>
-          </div>
-
-          <!-- Upload Progress Bar -->
-          <div class="upload-progress" id="uploadProgress">
-            <div class="upload-progress-header">
-              <span class="upload-progress-filename" id="uploadFileName">file.xlsx</span>
-              <span class="upload-progress-percent" id="uploadPercent">0%</span>
-            </div>
-            <div class="upload-progress-bar">
-              <div class="upload-progress-fill" id="uploadProgressFill" style="width: 0%;"></div>
-            </div>
-            <div class="upload-progress-status" id="uploadStatus">
-              <span class="spinner" style="width: 14px; height: 14px; border-width: 2px;"></span>
-              <span>Uploading...</span>
-            </div>
-          </div>
+  <div class="app-layout">
+    <!-- Chat Sidebar -->
+    <aside class="chat-sidebar" id="chatSidebar">
+      <div class="sidebar-header">
+        <div class="logo-small">
+          <img src="/static/images/millenium_favicon.png" alt="Logo">
+          <span>Millenium AI</span>
         </div>
+        <button class="btn-new-chat" onclick="startNewChat()" id="newChatBtn">
+          <span>+</span> New Chat
+        </button>
+      </div>
 
-        <!-- Datasets Card -->
-        <div class="card">
-          <div class="datasets-header">
-            <h2 class="card-title" style="margin-bottom: 0;">
-              <span class="icon">📋</span>
-              Datasets
-            </h2>
-            <button class="btn btn-secondary btn-sm" onclick="syncDatasets()">
-              🔄 Sync
+      <div class="chat-history" id="chatHistory">
+        <!-- Chat history items will be inserted here -->
+        <div class="chat-history-empty" id="chatHistoryEmpty">
+          <span class="icon">💬</span>
+          <p>No conversations yet</p>
+          <p class="hint">Start a new chat to begin</p>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="dataset-select-compact">
+          <label>Dataset:</label>
+          <select id="datasetSelect">
+            <option value="">-- Select --</option>
+          </select>
+        </div>
+        <button class="btn-upload-sm" onclick="togglePromptModal()">
+          ⚙️ Custom Instructions
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Chat Area -->
+    <main class="chat-main">
+      <!-- Chat Messages Area -->
+      <div class="chat-messages" id="chatMessages">
+        <!-- Welcome screen shown when no chat is active -->
+        <div class="welcome-screen" id="welcomeScreen">
+          <div class="welcome-icon">
+            <img src="/static/images/millenium_favicon.png" alt="Logo">
+          </div>
+          <h1>Millenium Semiconductors AI</h1>
+          <p>Ask questions about your data in natural language</p>
+          <div class="welcome-suggestions">
+            <button class="suggestion-chip" onclick="useSuggestion('Show top 10 customers by sales')">
+              📊 Top 10 customers by sales
+            </button>
+            <button class="suggestion-chip" onclick="useSuggestion('What is the total revenue this month?')">
+              💰 Total revenue this month
+            </button>
+            <button class="suggestion-chip" onclick="useSuggestion('Compare sales by region')">
+              🌍 Compare sales by region
             </button>
           </div>
-          <div class="datasets-list" id="datasetsList">
-            <div class="empty-state">
-              <div class="icon">📭</div>
-              <p>No datasets yet</p>
-            </div>
+        </div>
+
+        <!-- Messages container (hidden initially) -->
+        <div class="messages-container" id="messagesContainer" style="display: none;">
+          <!-- Messages will be inserted here -->
+        </div>
+
+        <!-- Thinking indicator -->
+        <div class="thinking-indicator" id="loading">
+          <div class="thinking-avatar">🤖</div>
+          <div class="thinking-content">
+            <span class="thinking-text">Thinking</span>
+            <span class="thinking-dots">
+              <span class="dot"></span>
+              <span class="dot"></span>
+              <span class="dot"></span>
+            </span>
           </div>
         </div>
       </div>
 
-      <!-- Right Column -->
-      <div class="right-column">
-        <div class="card">
-          <h2 class="card-title">
-            <span class="icon">💬</span>
-            Ask a Question
-          </h2>
+      <!-- Chat Input -->
+      <div class="chat-input-container">
+        <div class="chat-input-wrapper">
+          <button class="btn-plus" onclick="toggleUploadPanel()" id="plusBtn" title="Upload Data">
+            <span>+</span>
+          </button>
+          <input type="text" id="questionInput" placeholder="Ask anything about your data..."
+            onkeydown="if(event.key === 'Enter') askQuestion()">
+          <button class="btn-send" onclick="askQuestion()" id="askBtn">
+            <span>➤</span>
+          </button>
+        </div>
+        <!-- Custom prompt indicator -->
+        <div class="custom-prompt-indicator" id="promptIndicator" style="display: none;">
+          <span>✨ Custom instructions active</span>
+          <button onclick="clearCustomPrompt()">✕</button>
+        </div>
+      </div>
+    </main>
 
-          <div class="ask-section">
-            <!-- Dataset Selector -->
-            <div class="dataset-select-wrapper">
-              <label>Select Dataset:</label>
-              <select id="datasetSelect">
-                <option value="">-- Select a dataset --</option>
-              </select>
-            </div>
-
-            <div class="input-group">
-              <input type="text" id="questionInput" placeholder="e.g., What are the top 10 customers by sales?"
-                onkeydown="if(event.key === 'Enter') askQuestion()">
-              <button class="btn btn-primary" onclick="askQuestion()" id="askBtn">
-                ✨ Ask AI
-              </button>
-            </div>
-            <div class="response-time-badge" id="responseTimeBadge" style="display: none;">
-              ⚡ Response time: <span id="responseTime">0.00</span>s
-            </div>
+    <!-- Custom Prompt Modal -->
+    <div class="prompt-modal-overlay" id="promptModal" style="display: none;">
+      <div class="prompt-modal">
+        <div class="prompt-modal-header">
+          <h3>✨ Custom Instructions</h3>
+          <button class="btn-close" onclick="togglePromptModal()">×</button>
+        </div>
+        <div class="prompt-tabs">
+          <button class="prompt-tab active" onclick="switchPromptTab('global')" id="tabGlobal">Global
+            Instructions</button>
+          <button class="prompt-tab" onclick="switchPromptTab('chat')" id="tabChat">Chat Instructions</button>
+        </div>
+        <div class="prompt-modal-body">
+          <div id="contentGlobal" class="prompt-content">
+            <p class="prompt-hint">These instructions apply to <b>ALL chats</b>. Use for general behavior preferences.
+            </p>
+            <textarea id="globalPromptInput" placeholder="Examples:
+• Always be formal and professional
+• Use metric system for all units
+• Format dates as DD-MMM-YYYY"></textarea>
           </div>
-
-          <div class="thinking-indicator" id="loading">
-            <div class="thinking-avatar">🤖</div>
-            <div class="thinking-content">
-              <span class="thinking-text">Thinking</span>
-              <span class="thinking-dots">
-                <span class="dot"></span>
-                <span class="dot"></span>
-                <span class="dot"></span>
-              </span>
-            </div>
+          <div id="contentChat" class="prompt-content" style="display: none;">
+            <p class="prompt-hint">These instructions apply to <b>this chat only</b> and override global settings.</p>
+            <textarea id="customPromptInput" placeholder="Examples:
+• Focus on sales analysis for Q3
+• Compare only North and South regions
+• Be extremely detailed in this analysis"></textarea>
           </div>
-
-          <div class="results-section" id="results">
-            <!-- Results will be inserted here -->
-          </div>
+        </div>
+        <div class="prompt-modal-footer">
+          <button class="btn-secondary" onclick="togglePromptModal()">Cancel</button>
+          <button class="btn-primary" onclick="saveCustomPrompt()">Save Instructions</button>
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Upload Panel (hidden by default) -->
+  <div class="upload-panel" id="uploadPanel" style="display: none;">
+    <div class="upload-panel-header">
+      <h3>📤 Upload Data</h3>
+      <button class="btn-close" onclick="toggleUploadPanel()">×</button>
+    </div>
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      <span class="upload-icon">📁</span>
+      <p class="upload-text">Drop your file here or click to browse</p>
+      <p class="upload-hint">Supports .xlsx, .xls, and .csv files</p>
+    </div>
+    <div class="upload-progress" id="uploadProgress">
+      <div class="upload-progress-header">
+        <span class="upload-progress-filename" id="uploadFileName">file.xlsx</span>
+        <span class="upload-progress-percent" id="uploadPercent">0%</span>
+      </div>
+      <div class="upload-progress-bar">
+        <div class="upload-progress-fill" id="uploadProgressFill" style="width: 0%;"></div>
+      </div>
+      <div class="upload-progress-status" id="uploadStatus">
+        <span class="spinner" style="width: 14px; height: 14px; border-width: 2px;"></span>
+        <span>Uploading...</span>
+      </div>
+    </div>
+    <div class="datasets-list" id="datasetsList">
+      <!-- Datasets will be listed here -->
+    </div>
+  </div>
   </div>
 
   <!-- Modular JavaScript -->
@@ -141,6 +197,7 @@
   <script src="/static/js/api.js"></script>
   <script src="/static/js/upload.js"></script>
   <script src="/static/js/datasets.js"></script>
+  <script src="/static/js/chat.js"></script>
   <script src="/static/js/query.js"></script>
   <script src="/static/js/app.js"></script>
 </body>

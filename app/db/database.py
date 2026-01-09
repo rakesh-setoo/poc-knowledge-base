@@ -42,8 +42,66 @@ def init_metadata_table():
                 )
             """))
             conn.commit()
+        
+        # Initialize chat tables
+        init_chat_tables()
+        
     except Exception as e:
         logger.error(f"Failed to initialize datasets table: {e}")
+        raise
+
+
+def init_chat_tables():
+    """Create chat and messages tables for persistent chat history."""
+    try:
+        with engine.connect() as conn:
+            # Chats table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS chats (
+                    id SERIAL PRIMARY KEY,
+                    title VARCHAR(255) DEFAULT 'New Chat',
+                    dataset_id INTEGER,
+                    system_prompt TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            
+            # Add system_prompt column if it doesn't exist (for existing tables)
+            conn.execute(text("""
+                ALTER TABLE chats ADD COLUMN IF NOT EXISTS system_prompt TEXT
+            """))
+            
+            # Messages table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS messages (
+                    id SERIAL PRIMARY KEY,
+                    chat_id INTEGER REFERENCES chats(id) ON DELETE CASCADE,
+                    role VARCHAR(20) NOT NULL,
+                    content TEXT NOT NULL,
+                    metadata JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            
+            # Index for faster message retrieval
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)
+            """))
+            
+            # Settings table for global configuration (like global system prompt)
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key VARCHAR(100) PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            
+            conn.commit()
+            logger.info("Chat tables initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize chat tables: {e}")
         raise
 
 

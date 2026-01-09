@@ -1,12 +1,21 @@
 import json
+import time
 from sqlalchemy import text
 
 from app.db import engine
 from app.core.llm import llm_call
 from app.logging import logger
+from app.services.cache import get_cached_table_info, set_cached_table_info
 
 
 def get_table_info(table_name: str) -> dict:
+    start = time.time()
+    cached = get_cached_table_info(table_name)
+    if cached:
+        logger.info(f"[CACHE] Table info for '{table_name}' served from Redis in {(time.time() - start)*1000:.1f}ms")
+        return cached
+    
+    start = time.time()
     with engine.connect() as conn:
         type_query = text("""
             SELECT column_name, data_type 
@@ -22,12 +31,19 @@ def get_table_info(table_name: str) -> dict:
         sample_rows = [dict(row._mapping) for row in sample_result]
         
         distinct_values = _get_distinct_values(conn, table_name, column_types)
-        
-    return {
+    
+    table_info = {
         "column_types": column_types, 
         "sample_data": sample_rows,
         "distinct_values": distinct_values
     }
+    
+    db_time = (time.time() - start) * 1000
+    logger.info(f"[DB] Table info for '{table_name}' fetched from DB in {db_time:.1f}ms")
+    
+    set_cached_table_info(table_name, table_info)
+    
+    return table_info
 
 
 def _get_distinct_values(conn, table_name: str, column_types: dict) -> dict:
@@ -49,21 +65,27 @@ def _get_distinct_values(conn, table_name: str, column_types: dict) -> dict:
     return distinct_values
 
 
-def build_sql_prompt(question: str, table: str, table_info: dict) -> str:
+def build_sql_prompt(question: str, table: str, table_info: dict, history_context: str = "") -> str:
     distinct_section = ""
     if table_info.get('distinct_values'):
         distinct_section = f"\nKey column values: {json.dumps(table_info['distinct_values'])}"
     
-    # Format columns with their types for better SQL generation
     column_types = table_info['column_types']
     columns_formatted = ", ".join([f"{col} ({dtype})" for col, dtype in column_types.items()])
+    
+    context_section = ""
+    if history_context:
+        context_section = f"""
+CONVERSATION CONTEXT (use this to understand references like "the 4th one", "that customer", etc.):
+{history_context}
+"""
     
     return f"""You are a PostgreSQL expert. Generate an accurate SQL query for this question.
 
 TABLE: {table}
 COLUMNS (with types): {columns_formatted}
 SAMPLE DATA: {json.dumps(table_info['sample_data'][:5], default=str)}{distinct_section}
-
+{context_section}
 QUERY PATTERNS (use the appropriate pattern):
 
 1. RANKING ("what rank is X", "position of X"):
@@ -100,6 +122,14 @@ QUERY PATTERNS (use the appropriate pattern):
 7. TREND ("by month", "over time"):
    GROUP BY time_column ORDER BY time_column
 
+8. FOLLOW-UP REFERENCES ("the 4th one", "that customer", "details about X"):
+   CRITICAL: If the user refers to a numbered item from previous conversation:
+   - Look for the EXACT numbered position in the CONVERSATION CONTEXT above
+   - Parse the format: "N. [emoji] **NAME**" -> extract NAME for position N
+   - Example context: "1. 🏆 UNOMINDA... 2. 🥈 NAPINO... 3. 🥉 Fiem... 4. XOLO INTERNATIONAL..."
+   - If user asks "the 4th one" -> find "4. XOLO" -> generate: WHERE customer ILIKE '%XOLO%'
+   - DO NOT guess or use wrong position. Count carefully from 1.
+
 IMPORTANT PostgreSQL Rules:
 - ROUND with decimals MUST cast to numeric: ROUND(value::numeric, 2) NOT ROUND(value, 2)
 - For already numeric columns, just use: ROUND(AVG(column)::numeric, 2)
@@ -110,33 +140,83 @@ QUESTION: {question}
 
 OUTPUT: Only the SQL query, nothing else."""
 
+# Default system prompt for AI responses
+DEFAULT_SYSTEM_PROMPT = """You are an expert Business Analyst Assistant. Your goal is to transform raw data into a clear, "Human-Readable" Executive Summary.
 
-def build_answer_prompt(question: str, result_data: list) -> str:
-    """Build the prompt for answer generation."""
-    sample = result_data[:10]  # Reduced from 20 for faster processing
+### 🧠 RESPONSE STRATEGY (ADAPT TO DATA TYPE)
+
+1.  **If RANKING/LEADERS** ("Top regions", "Best managers"):
+    -   **ALWAYS use explicit numbers** (1., 2., 3.) alongside emojis for follow-up reference.
+    -   Format: `1. 🏆 **Name** — ₹X Cr`
+    -   Example:
+        ```
+        1. 🏆 **UNOMINDA** — ₹38.85 Cr
+        2. 🥈 **NAPINO** — ₹19.49 Cr  
+        3. 🥉 **Fiem Industries** — ₹18.32 Cr
+        4. XOLO INTERNATIONAL — ₹12.55 Cr
+        ```
+    -   This ensures "the 3rd one" clearly refers to item #3.
+
+2.  **If COMPARISON** ("North vs South", "Product A vs B"):
+    -   Use a **Side-by-Side** narrative.
+    -   Explicitly state the difference: "Product A is **20% higher** than B."
+    -   Use emojis like 🆚 or ⚖️.
+
+3.  **If TREND/TIME** ("Sales over time", "Growth"):
+    -   Describe the **Trajectory**: "📈 Steady growth," "📉 Sharp decline."
+    -   Highlight the **Peak** and **Low** points.
+
+4.  **If BREAKDOWN** ("Sales by Region", "Category wise"):
+    -   **GROUP DATA** (Critical): Never print a flat list. Group by the main category.
+    -   Header format: `🔹 [Category Name]`
+
+---
+
+### 🎨 VISUAL FORMATTING RULES
+
+1.  **Headers**: Use bold headers with emojis for sections.
+    -   `📊 **Sales Overview**`
+    -   `💡 **Key Insights**`
+
+2.  **Numbers**:
+    -   **Currency**: Use Indian format for INR (₹10.5 Lakhs, ₹5.2 Cr).
+    -   **Formatting**: **Bold** all critical numbers so they stand out.
+    -   **Decimals**: Keep to 1 or 2 decimal places.
+
+3.  **Lists vs Tables**:
+    -   Use **Bullet Lists** for hierarchical data (Region -> Manager).
+    -   Use **Markdown Tables** ONLY for small, high-density summaries (max 5 rows).
+    -   *Never* create a table with >10 rows. Breaks it into groups.
+
+4.  **Insights (The "So What?"):**
+    -   Explain *why* a number matters if possible (e.g., "This represents a 15% share").
+
+---
+
+### ❌ ANTI-PATTERNS (DO NOT DO)
+-   🚫 Do not just dump the JSON rows.
+-   🚫 Do not use technical column names (use "Sales", not "SUM(sales_amount)").
+-   🚫 NEVER say "Based on the query", "In the results", "The SQL returned". proper nouns. Just state the facts.
+"""
+
+
+def build_answer_prompt(question: str, result_data: list, history_context: str = "", custom_prompt: str = None) -> str:
+    sample = result_data[:10]
     
-    # return f"""Answer concisely based on the data below.
+    # Always use default prompt, add custom instructions on top if provided
+    if custom_prompt:
+        system_instructions = f"{DEFAULT_SYSTEM_PROMPT}\n\n### 📝 ADDITIONAL USER INSTRUCTIONS:\n{custom_prompt}"
+    else:
+        system_instructions = DEFAULT_SYSTEM_PROMPT
+    
     return f"""Answer the question in natural language based on the query results below.
-
+{history_context}
 Question: {question}
 
 Data ({len(result_data)} rows):
 {json.dumps(sample, default=str)}   
 
-    RESPONSE GUIDELINES:
-1. Start with a brief, friendly sentence answering the question directly
-2. Present data as a simple numbered or bulleted list - DO NOT use markdown tables
-3. Each list item should be clear and readable, like: "April: 87.23 days"
-4. Format values for readability:
-   - Currency/Sales/Revenue: Use Indian format - ₹38.85 Cr (crores), ₹19.49 L (lakhs)
-   - Round decimals to 2 places
-5. Keep the response concise and easy to scan
-6. Do not use markdown table syntax (no | or --- characters)"""
-
-# Rules:
-# - Start with 1 sentence answering the question
-# - List key data points briefly
-# - Use ₹ Cr/L for currency (Indian format)
+{system_instructions}"""
 # - No markdown tables"""
 
 

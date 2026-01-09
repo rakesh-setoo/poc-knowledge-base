@@ -12,6 +12,7 @@ from app.schemas import (
 )
 from app.logging import DatasetNotFoundError, logger
 from app.services.upload import process_upload_with_progress
+from app.services.cache import invalidate_table_cache
 
 
 router = APIRouter(prefix="/datasets", tags=["Datasets"])
@@ -86,6 +87,10 @@ def delete_dataset(table_name: str):
             conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}"'))
             conn.commit()
         delete_dataset_metadata(table_name)
+        
+        # Invalidate Redis cache for this table
+        invalidate_table_cache(table_name)
+        
         refresh_datasets()
         logger.info(f"Deleted dataset: {table_name}")
     except Exception as e:
@@ -108,7 +113,7 @@ async def upload_excel(file: UploadFile):
     async def process_with_progress():
         chunks = []
         total_size = 0
-        chunk_size = 64 * 1024  # 64KB chunks
+        chunk_size = 64 * 1024 
         
         yield f"data: {json.dumps({'progress': 1, 'status': '1% - Starting upload...'})}\\n\\n"
         await asyncio.sleep(0.05)

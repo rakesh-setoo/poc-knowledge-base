@@ -113,8 +113,6 @@ async def _save_to_database(
     total_rows: int,
     dtype_map: dict = None
 ) -> AsyncGenerator[str, None]:
-    """Save DataFrame to database with proper column types."""
-    # Use inferred types if provided
     sql_kwargs = {
         "name": table_name,
         "con": engine,

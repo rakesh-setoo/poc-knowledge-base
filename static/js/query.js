@@ -1,6 +1,6 @@
 /*
  * Query Module
- * Handles question asking and result rendering with streaming
+ * Handles question asking with streaming and integrates with chat system
  */
 
 /**
@@ -25,24 +25,31 @@ async function askQuestion() {
 
   const selectedDatasetId = parseInt(selectedValue);
   const loading = document.getElementById('loading');
-  const results = document.getElementById('results');
   const askBtn = document.getElementById('askBtn');
-  const responseTimeBadge = document.getElementById('responseTimeBadge');
-  const responseTimeEl = document.getElementById('responseTime');
 
-  // Hide response time badge and show loading state
-  responseTimeBadge.style.display = 'none';
+  // Clear input immediately
+  input.value = '';
+
+  // Add user message to chat
+  addMessageToChat('user', question);
+
+  // Show loading state
   loading.classList.add('show');
-  results.classList.remove('show');
   askBtn.disabled = true;
 
-  const startTime = performance.now();
+  // Variables to hold assistant message element (created after metadata)
+  let assistantMessage = null;
+  let bubbleP = null;
 
   try {
     const response = await fetch(`${API_BASE}/ask-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: question, dataset_id: selectedDatasetId })
+      body: JSON.stringify({
+        question: question,
+        dataset_id: selectedDatasetId,
+        chat_id: currentChatId
+      })
     });
 
     if (!response.ok) {
@@ -54,18 +61,15 @@ async function askQuestion() {
     let streamedAnswer = '';
     let metadataReceived = false;
     let resultData = null;
-    let buffer = '';  // Buffer to accumulate incomplete chunks
+    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      // Add new data to buffer
       buffer += decoder.decode(value, { stream: true });
 
-      // Process complete lines from buffer
       const lines = buffer.split('\n');
-      // Keep the last incomplete line in buffer
       buffer = lines.pop() || '';
 
       for (const line of lines) {
@@ -77,109 +81,148 @@ async function askQuestion() {
           // Handle error
           if (data.error) {
             loading.classList.remove('show');
-            results.classList.add('show');
-            renderError(results, data);
+            // Create error message
+            const errorMsg = addMessageToChat('assistant', '');
+            errorMsg.querySelector('.message-bubble p').innerHTML = `<span class="error-text">⚠️ ${data.error}</span>`;
             askBtn.disabled = false;
             return;
           }
 
-          // Handle metadata (table, SQL, data) - render immediately
+          // Handle metadata - create assistant message for streaming
           if (data.type === 'metadata') {
             metadataReceived = true;
             resultData = data;
+
+            // Update currentChatId if this is a new chat
+            if (data.chat_id && !currentChatId) {
+              currentChatId = data.chat_id;
+            }
+
             loading.classList.remove('show');
-            results.classList.add('show');
-            renderStreamingResults(results, data, '');
+
+            // NOW create the assistant message for streaming (after thinking is done)
+            assistantMessage = addMessageToChat('assistant', '');
+            bubbleP = assistantMessage.querySelector('.message-bubble p');
           }
 
           // Handle streaming tokens
           if (data.type === 'token' && metadataReceived) {
             streamedAnswer += data.content;
-            updateStreamingAnswer(streamedAnswer);
+            bubbleP.innerHTML = formatAnswer(streamedAnswer) + '<span class="streaming-cursor">▊</span>';
+            scrollToBottom();
           }
 
           // Handle completion
           if (data.type === 'done') {
-            responseTimeEl.textContent = data.elapsed.toFixed(2);
-            responseTimeBadge.style.display = 'block';
-            // Remove cursor when done
-            const answerEl = document.getElementById('streamingAnswer');
-            if (answerEl && streamedAnswer) {
-              answerEl.innerHTML = formatAnswer(streamedAnswer);
+            // Finalize message (remove cursor)
+            bubbleP.innerHTML = formatAnswer(streamedAnswer);
+
+            // Add data table if we have results
+            if (resultData && resultData.data && resultData.data.length > 0) {
+              const tableContainer = document.createElement('div');
+              tableContainer.className = 'message-data-table';
+              tableContainer.innerHTML = renderDataTable(resultData.columns, resultData.data);
+              assistantMessage.querySelector('.message-content').appendChild(tableContainer);
             }
+
+            // Reload chat history to show new/updated chat
+            loadChatHistory();
+            scrollToBottom();
           }
         } catch (e) {
-          // Skip malformed JSON - may be incomplete chunk
-          console.debug('JSON parse error (may be incomplete chunk):', e.message);
+          console.debug('JSON parse error:', e.message);
         }
       }
     }
 
   } catch (error) {
-    const endTime = performance.now();
-    const elapsedSeconds = ((endTime - startTime) / 1000).toFixed(2);
-    responseTimeEl.textContent = elapsedSeconds;
-    responseTimeBadge.style.display = 'block';
-
     loading.classList.remove('show');
-    results.classList.add('show');
     console.error('Connection error:', error);
-    results.innerHTML = `
-      <div class="result-error">
-        <strong>⚠️ Oops!</strong> Something went wrong. Please try again.
-      </div>
-    `;
+    bubbleP.innerHTML = '<span class="error-text">⚠️ Something went wrong. Please try again.</span>';
   }
 
   askBtn.disabled = false;
 }
 
 /**
- * Render results with placeholder for streaming answer
+ * Render data table HTML
  */
-function renderStreamingResults(container, data, answer) {
-  container.innerHTML = `
-    <div class="result-card">
-      <div class="result-insight">
-        <span class="insight-icon">💡</span>
-        <span class="insight-text" id="streamingAnswer">${answer ? formatAnswer(answer) : '<span class="streaming-cursor">▊</span>'}</span>
-      </div>
-    </div>
-    
-    <div class="result-card">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-        <div class="result-label" style="margin-bottom: 0;">Results</div>
-        <span class="row-count-badge">📊 ${data.row_count} rows</span>
-      </div>
-      ${renderDataTable(data.columns, data.data)}
-    </div>
-    
-    <div class="result-card">
-      <div class="result-label">Generated SQL</div>
-      <div class="result-sql">${escapeHtml(data.generated_sql)}</div>
-      <div class="result-meta" style="margin-top: 1rem;">
-        <span>📋 Table: <strong>${data.table_used}</strong></span>
-      </div>
-    </div>
-  `;
-}
+function renderDataTable(columns, data) {
+  if (!columns || !data || data.length === 0) return '';
 
-/**
- * Update the streaming answer in place
- */
-function updateStreamingAnswer(answer) {
-  const answerEl = document.getElementById('streamingAnswer');
-  if (answerEl) {
-    answerEl.innerHTML = formatAnswer(answer) + '<span class="streaming-cursor">▊</span>';
+  // Limit display to 10 rows with pagination
+  const displayData = data.slice(0, 10);
+  const hasMore = data.length > 10;
+
+  // Wrap in details/summary for default collapsed state
+  let html = `
+  <details class="data-details">
+    <summary class="data-summary">
+      <span class="icon">📋</span>
+      <span>View Table</span>
+    </summary>
+    <div class="data-table-wrapper">
+      <table class="data-table"><thead><tr>`;
+
+  columns.forEach(col => {
+    html += `<th>${escapeHtml(col)}</th>`;
+  });
+
+  html += '</tr></thead><tbody>';
+
+  displayData.forEach(row => {
+    html += '<tr>';
+    columns.forEach(col => {
+      const value = row[col];
+      html += `<td>${formatCellValue(value)}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+
+  if (hasMore) {
+    html += `<div class="table-more">... and ${data.length - 10} more rows</div>`;
   }
+
+  html += '</div></details>';
+
+  return html;
 }
 
 /**
- * Render error response
+ * Format cell value for display
+ */
+function formatCellValue(value) {
+  if (value === null || value === undefined) return '<span class="null-value">-</span>';
+  if (typeof value === 'number') {
+    // Format numbers with commas
+    return value.toLocaleString();
+  }
+  return escapeHtml(String(value));
+}
+
+/**
+ * Format answer text with markdown-like formatting
+ */
+function formatAnswer(text) {
+  if (!text) return '';
+
+  return text
+    // Bold
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    // Line breaks
+    .replace(/\n/g, '<br>')
+    // Numbered lists
+    .replace(/^(\d+)\.\s/gm, '<span class="list-number">$1.</span> ');
+}
+
+/**
+ * Render error message
  */
 function renderError(container, data) {
-  // Show generic error message to user (detailed error is logged in backend terminal)
-  console.error('Query error:', data.error);
   container.innerHTML = `
     <div class="result-error">
       <strong>⚠️ Oops!</strong> ${data.error}
@@ -187,131 +230,15 @@ function renderError(container, data) {
   `;
 }
 
-/**
- * Render successful query results
- */
+// Legacy functions kept for compatibility
+function renderStreamingResults(container, data, answer) {
+  // Now handled by chat message system
+}
+
+function updateStreamingAnswer(answer) {
+  // Now handled inline in askQuestion
+}
+
 function renderResults(container, data) {
-  container.innerHTML = `
-    <div class="result-card">
-      <div class="result-insight">
-        <span class="insight-icon">💡</span>
-        <span class="insight-text">${formatAnswer(data.answer)}</span>
-      </div>
-    </div>
-    
-    <div class="result-card">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-        <div class="result-label" style="margin-bottom: 0;">Results</div>
-        <span class="row-count-badge">📊 ${data.row_count} rows</span>
-      </div>
-      ${renderDataTable(data.columns, data.data)}
-    </div>
-    
-    <div class="result-card">
-      <div class="result-label">Generated SQL</div>
-      <div class="result-sql">${escapeHtml(data.generated_sql)}</div>
-      <div class="result-meta" style="margin-top: 1rem;">
-        <span>📋 Table: <strong>${data.table_used}</strong></span>
-      </div>
-    </div>
-  `;
+  // Now handled by chat message system
 }
-
-// Pagination state
-let paginationState = {
-  columns: [],
-  data: [],
-  currentPage: 1,
-  rowsPerPage: 50
-};
-
-/**
- * Render data table with pagination
- */
-function renderDataTable(columns, data, page = 1) {
-  if (!data || data.length === 0) {
-    return '<p style="color: var(--text-muted); text-align: center; padding: 1rem;">No results found</p>';
-  }
-
-  // Store state for pagination
-  paginationState.columns = columns;
-  paginationState.data = data;
-  paginationState.currentPage = page;
-
-  const totalRows = data.length;
-  const totalPages = Math.ceil(totalRows / paginationState.rowsPerPage);
-  const startIndex = (page - 1) * paginationState.rowsPerPage;
-  const endIndex = Math.min(startIndex + paginationState.rowsPerPage, totalRows);
-  const pageData = data.slice(startIndex, endIndex);
-
-  // Determine if each column is numeric by checking first row values
-  const headers = columns.map(col => {
-    const firstRowValue = data[0][col];
-    const headerClass = isNumeric(firstRowValue) ? 'number-header' : '';
-    return `<th class="${headerClass}">${escapeHtml(formatColumnName(col))}</th>`;
-  }).join('');
-
-  const rows = pageData.map((row, index) => {
-    const cells = columns.map(col => {
-      const value = row[col];
-      const cellClass = isNumeric(value) ? 'number-cell' : 'name-cell';
-      const formattedValue = formatCellValue(value, col);
-      return `<td class="${cellClass}">${formattedValue}</td>`;
-    }).join('');
-    return `<tr><td class="rank-cell">${startIndex + index + 1}</td>${cells}</tr>`;
-  }).join('');
-
-  // Pagination controls (only show if more than 50 rows)
-  const paginationHtml = totalRows > paginationState.rowsPerPage ? `
-    <div class="pagination-controls">
-      <button class="pagination-btn" onclick="goToPage(${page - 1})" ${page === 1 ? 'disabled' : ''}>
-        ← Previous
-      </button>
-      <span class="pagination-info">
-        Page ${page} of ${totalPages} (${startIndex + 1}-${endIndex} of ${totalRows})
-      </span>
-      <button class="pagination-btn" onclick="goToPage(${page + 1})" ${page === totalPages ? 'disabled' : ''}>
-        Next →
-      </button>
-    </div>
-  ` : '';
-
-  return `
-    <div class="result-table-wrapper">
-      <table class="result-table">
-        <thead>
-          <tr><th>#</th>${headers}</tr>
-        </thead>
-        <tbody>
-          ${rows}
-        </tbody>
-      </table>
-    </div>
-    ${paginationHtml}
-  `;
-}
-
-/**
- * Go to a specific page
- */
-function goToPage(page) {
-  if (page < 1 || page > Math.ceil(paginationState.data.length / paginationState.rowsPerPage)) {
-    return;
-  }
-
-  const tableContainer = document.querySelector('.result-table-wrapper')?.parentElement;
-  if (tableContainer) {
-    const rowCountBadge = tableContainer.querySelector('.row-count-badge');
-    const rowCountHtml = rowCountBadge ? rowCountBadge.outerHTML : '';
-    const labelHtml = '<div class="result-label" style="margin-bottom: 0;">Results</div>';
-
-    tableContainer.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-        ${labelHtml}
-        ${rowCountHtml}
-      </div>
-      ${renderDataTable(paginationState.columns, paginationState.data, page)}
-    `;
-  }
-}
-

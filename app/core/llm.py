@@ -10,7 +10,7 @@ client = OpenAI(api_key=settings.openai_api_key)
 def llm_call(
     prompt: str, 
     temperature: float = 0, 
-    max_tokens: int = 500,
+    max_tokens: int = 1000,
     system_prompt: str = "You are a helpful data assistant"
 ) -> str:
     try:
@@ -42,7 +42,7 @@ def llm_call(
 def llm_call_stream(
     prompt: str, 
     temperature: float = 0, 
-    max_tokens: int = 500,
+    max_tokens: int = 1000,
     system_prompt: str = "You are a helpful data assistant"
 ) -> Generator[str, None, None]:
     """Generator that yields tokens as they arrive from the LLM."""

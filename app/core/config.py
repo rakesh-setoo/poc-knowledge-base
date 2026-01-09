@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = Field(default=False, description="Enable rate limiting")
     rate_limit_requests: int = Field(default=100, description="Max requests per minute")
     
+    # Redis (for conversation history)
+    redis_url: Optional[str] = Field(default=None, description="Redis connection URL (optional)")
+    
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""

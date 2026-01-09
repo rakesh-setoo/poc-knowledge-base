@@ -31,22 +31,9 @@ async function deleteDatasetAPI(tableName) {
 }
 
 /**
- * Ask a question
- */
-async function askQuestionAPI(question, datasetId) {
-  console.log('Sending API Request:', { question, datasetId });
-  const response = await fetch(`${API_BASE}/ask`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question: question, dataset_id: datasetId })
-  });
-  return response.json();
-}
-
-/**
- * Upload file with SSE progress
- * Returns the Response object for SSE streaming
- */
+   * Upload file with SSE progress
+   * Returns the Response object for SSE streaming
+   */
 async function uploadFileAPI(formData) {
   const response = await fetch(`${API_BASE}/upload-excel`, {
     method: 'POST',

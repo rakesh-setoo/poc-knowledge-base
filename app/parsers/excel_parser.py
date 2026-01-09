@@ -23,12 +23,10 @@ class ExcelParser(BaseParser):
             if progress_callback:
                 await progress_callback(35, "35% - Reading Excel structure...")
             
-            # Try calamine engine first (5-10x faster for large files)
             try:
                 df_raw = pd.read_excel(io.BytesIO(content), header=None, engine='calamine')
                 engine = 'calamine'
             except Exception:
-                # Fallback to openpyxl if calamine fails
                 df_raw = pd.read_excel(io.BytesIO(content), header=None, engine='openpyxl')
                 engine = 'openpyxl'
             

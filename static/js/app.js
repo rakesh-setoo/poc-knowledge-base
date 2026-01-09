@@ -12,6 +12,9 @@ function initApp() {
 
   // Load initial datasets
   loadDatasets();
+
+  // Load chat history
+  loadChatHistory();
 }
 
 // Run on DOM ready
