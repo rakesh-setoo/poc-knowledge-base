@@ -50,5 +50,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-# Run with gunicorn for production (use 1 worker for local dev to avoid cache sync issues)
-CMD ["gunicorn", "app.main:app", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]
+# Run with gunicorn for production
+# --timeout 300: Allow 5 minutes for slow uploads/queries
+# --graceful-timeout 30: Wait 30s for graceful shutdown
+CMD ["gunicorn", "app.main:app", "-w", "1", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "300", "--graceful-timeout", "30"]
