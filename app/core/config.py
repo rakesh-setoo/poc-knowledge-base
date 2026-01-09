@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Optional
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, AliasChoices
 
 
 class Settings(BaseSettings):
@@ -15,14 +15,22 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", description="Server host")
     port: int = Field(default=8005, description="Server port")
     
-    # Database
-    database_url: str = Field(..., description="PostgreSQL connection URL")
+    # Database - accept both uppercase (Render) and lowercase
+    database_url: str = Field(
+        ..., 
+        validation_alias=AliasChoices('database_url', 'DATABASE_URL'),
+        description="PostgreSQL connection URL"
+    )
     db_pool_size: int = Field(default=5, description="Database connection pool size")
     db_max_overflow: int = Field(default=10, description="Max overflow connections")
     
-    # OpenAI
-    openai_api_key: str = Field(..., description="OpenAI API key")
-    openai_model: str = Field(default="gpt-5.2", description="OpenAI model to use")
+    # OpenAI - accept both uppercase and lowercase
+    openai_api_key: str = Field(
+        default="",  # Empty default - will fail gracefully if not set
+        validation_alias=AliasChoices('openai_api_key', 'OPENAI_API_KEY'),
+        description="OpenAI API key"
+    )
+    openai_model: str = Field(default="gpt-4o", description="OpenAI model to use")
     
     # Security
     cors_origins: str = Field(default="*", description="Comma-separated list of allowed CORS origins")
