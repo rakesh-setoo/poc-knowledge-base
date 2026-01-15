@@ -119,10 +119,32 @@ QUERY PATTERNS (use the appropriate pattern):
    IMPORTANT: For numeric columns, use them directly - no casting needed!
    Example: AVG(numeric_column), not NULLIF(column,'')::numeric
 
-7. TREND ("by month", "over time"):
-   GROUP BY time_column ORDER BY time_column
+7. COUNTING DISTINCT RECORDS ("how many invoices", "number of orders", "count of transactions"):
+   CRITICAL: When counting invoices/orders/transactions/records from a data table:
+   - ALWAYS use COUNT(DISTINCT id_column) if an ID column exists (like invoice_id, invoice_no, order_id)
+   - COUNT(*) counts ROWS (line items), which inflates the count!
+   - The ID column tells you unique records vs line items
+   Example: SELECT EXTRACT(MONTH FROM date_col) as month, COUNT(DISTINCT invoice_id) as invoices
+            FROM table GROUP BY 1 ORDER BY 1
 
-8. FOLLOW-UP REFERENCES ("the 4th one", "that customer", "details about X"):
+8. TREND ("by month", "over time", "monthly sales"):
+   CRITICAL for correct chart ordering:
+   - ALWAYS ORDER BY the actual date column or date expression, NOT by the formatted text label!
+   - TO_CHAR('Month YYYY') sorts ALPHABETICALLY (April, June, May) - WRONG!
+   - Use: ORDER BY date_column or ORDER BY EXTRACT(MONTH FROM date_column)
+   
+   Example for monthly trend with correct ordering:
+   SELECT TO_CHAR(date_col, 'Month YYYY') as month_year, SUM(amount) as total
+   FROM table 
+   WHERE date_col >= '2025-04-01'
+   GROUP BY TO_CHAR(date_col, 'Month YYYY'), EXTRACT(MONTH FROM date_col)
+   ORDER BY EXTRACT(MONTH FROM date_col)  -- This ensures chronological order!
+   
+   Or use the date directly:
+   SELECT DATE_TRUNC('month', date_col) as month, SUM(amount) as total
+   FROM table GROUP BY 1 ORDER BY 1
+
+9. FOLLOW-UP REFERENCES ("the 4th one", "that customer", "details about X"):
    CRITICAL: If the user refers to a numbered item from previous conversation:
    - Look for the EXACT numbered position in the CONVERSATION CONTEXT above
    - Parse the format: "N. [emoji] **NAME**" -> extract NAME for position N
@@ -135,6 +157,7 @@ IMPORTANT PostgreSQL Rules:
 - For already numeric columns, just use: ROUND(AVG(column)::numeric, 2)
 - Do NOT use NULLIF or empty string checks on numeric columns - they already handle NULL properly
 - Only use NULLIF for TEXT columns that might have empty strings
+- GROUP BY with expressions (EXTRACT, TO_CHAR): Use positional reference GROUP BY 1, not alias!
 
 QUESTION: {question}
 
@@ -179,8 +202,13 @@ DEFAULT_SYSTEM_PROMPT = """You are an expert Business Analyst Assistant. Your go
     -   `💡 **Key Insights**`
 
 2.  **Numbers**:
-    -   **Currency**: Use Indian format for INR (₹10.5 Lakhs, ₹5.2 Cr).
-    -   **Formatting**: **Bold** all critical numbers so they stand out.
+    -   **Currency Conversion (CRITICAL)**:
+        -   1 Lakh = 100,000 (1,00,000)
+        -   1 Crore = 10,000,000 (1,00,00,000) = 10 Million
+        -   To convert raw INR to Crores: divide by 10,000,000 (NOT 1 million!)
+        -   Example: ₹1,067,790,122 = ₹106.78 Crores (divide by 10 million)
+    -   **Formatting**: Use ₹X.XX Cr for crores, ₹X.XX Lakhs for smaller amounts
+    -   **Bold** all critical numbers so they stand out.
     -   **Decimals**: Keep to 1 or 2 decimal places.
 
 3.  **Lists vs Tables**:

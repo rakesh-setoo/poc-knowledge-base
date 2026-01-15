@@ -1,5 +1,6 @@
 import time
 import json
+from decimal import Decimal
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -8,6 +9,7 @@ from app.services.query import (
     get_table_info, build_sql_prompt, build_answer_prompt, select_table
 )
 from app.services.conversation import add_to_history, format_history_for_prompt
+from app.services.visualization import detect_visualization_type
 from app.services.chat import add_message, get_messages, create_chat, auto_generate_title, get_chat
 from app.services.settings import get_global_system_prompt
 from app.core.llm import llm_call, llm_call_stream
@@ -137,7 +139,23 @@ async def ask_question_stream(
             
             result_data = [dict(zip(columns, row)) for row in rows]
             
-            # Send metadata immediately (table, SQL, columns, data, chat_id)
+            # DEBUG: Log the SQL and raw results for troubleshooting
+            logger.info(f"[DEBUG SQL] Generated: {validated_sql}")
+            logger.info(f"[DEBUG DATA] Columns: {columns}")
+            logger.info(f"[DEBUG DATA] First 3 rows: {result_data[:3]}")
+            
+            # Convert non-JSON-serializable types (Decimal, datetime, etc.)
+            for row_dict in result_data:
+                for key, value in row_dict.items():
+                    if isinstance(value, Decimal):
+                        row_dict[key] = float(value)
+                    elif hasattr(value, 'isoformat'):  # datetime, date, time
+                        row_dict[key] = value.isoformat()
+            
+            # Detect best visualization type for this result
+            viz_type = detect_visualization_type(question, columns, result_data)
+            
+            # Send metadata immediately (table, SQL, columns, data, chat_id, viz_type)
             metadata = {
                 "type": "metadata",
                 "chat_id": chat_id,
@@ -145,10 +163,11 @@ async def ask_question_stream(
                 "generated_sql": validated_sql,
                 "columns": columns,
                 "data": result_data,
-                "row_count": len(result_data)
+                "row_count": len(result_data),
+                "viz_type": viz_type
             }
             yield f"data: {json.dumps(metadata, default=str)}\n\n"
-            logger.info(f"[STREAM TIMING] Metadata sent - {len(result_data)} rows, chat_id: {chat_id}")
+            logger.info(f"[STREAM] Metadata sent - {len(result_data)} rows, viz_type: {viz_type}")
             
             # Phase 8: Stream answer generation with conversation history
             phase_start = time.time()
@@ -163,16 +182,22 @@ async def ask_question_stream(
                 full_answer.append(token)
                 token_count += 1
             
-            # Store this Q&A in conversation history for future context (uses chat_id)
+            # Store this Q&A in conversation history with viz data
             answer_text = "".join(full_answer)
             if chat_id:
-                add_to_history(chat_id, question, answer_text)
+                add_to_history(
+                    chat_id, question, answer_text,
+                    columns=columns, data=result_data, viz_type=viz_type
+                )
             
-            # Save assistant message to database
+            # Save assistant message to database (include viz_type)
             add_message(chat_id, "assistant", answer_text, {
                 "table_used": table_used,
                 "generated_sql": validated_sql,
-                "row_count": len(result_data)
+                "row_count": len(result_data),
+                "viz_type": viz_type,
+                "columns": columns,
+                "data": result_data[:100]  # Limit stored data
             })
             
             # Auto-generate title from first question

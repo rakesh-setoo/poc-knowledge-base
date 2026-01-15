@@ -88,7 +88,7 @@ async function askQuestion() {
             return;
           }
 
-          // Handle metadata - create assistant message for streaming
+          // Handle metadata - create assistant message and visualization FIRST
           if (data.type === 'metadata') {
             metadataReceived = true;
             resultData = data;
@@ -100,9 +100,58 @@ async function askQuestion() {
 
             loading.classList.remove('show');
 
-            // NOW create the assistant message for streaming (after thinking is done)
-            assistantMessage = addMessageToChat('assistant', '');
-            bubbleP = assistantMessage.querySelector('.message-bubble p');
+            // Create assistant message with structure for viz FIRST, then text
+            assistantMessage = document.createElement('div');
+            assistantMessage.className = 'message assistant';
+            assistantMessage.innerHTML = `
+              <div class="message-avatar">🤖</div>
+              <div class="message-content">
+                <div class="message-bubble">
+                  <div class="viz-placeholder"></div>
+                  <p class="answer-text"></p>
+                </div>
+              </div>
+            `;
+
+            // Show messages container
+            document.getElementById('welcomeScreen').style.display = 'none';
+            const container = document.getElementById('messagesContainer');
+            container.style.display = 'flex';
+            container.appendChild(assistantMessage);
+
+            // Get reference to text paragraph
+            bubbleP = assistantMessage.querySelector('.answer-text');
+
+            // Render visualization IMMEDIATELY (ChatGPT style - viz appears first)
+            if (resultData.data && resultData.data.length > 0) {
+              const vizType = resultData.viz_type || 'table';
+              const columns = resultData.columns;
+              const vizData = resultData.data;
+              const vizPlaceholder = assistantMessage.querySelector('.viz-placeholder');
+
+              if (shouldRenderChart(vizType, vizData)) {
+                // Create chart container directly (no toggle tabs)
+                const vizId = `viz-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                vizPlaceholder.innerHTML = `
+                  <div class="viz-wrapper viz-inline">
+                    <div class="viz-chart-container" id="${vizId}"></div>
+                  </div>
+                `;
+                // Render chart after DOM update
+                setTimeout(() => {
+                  renderVisualization(vizId, vizType, columns, vizData);
+                }, 50);
+              } else {
+                // Render table directly
+                vizPlaceholder.innerHTML = `
+                  <div class="message-data-table viz-inline">
+                    ${renderDataTable(columns, vizData)}
+                  </div>
+                `;
+              }
+            }
+
+            scrollToBottom();
           }
 
           // Handle streaming tokens
@@ -116,14 +165,6 @@ async function askQuestion() {
           if (data.type === 'done') {
             // Finalize message (remove cursor)
             bubbleP.innerHTML = formatAnswer(streamedAnswer);
-
-            // Add data table if we have results
-            if (resultData && resultData.data && resultData.data.length > 0) {
-              const tableContainer = document.createElement('div');
-              tableContainer.className = 'message-data-table';
-              tableContainer.innerHTML = renderDataTable(resultData.columns, resultData.data);
-              assistantMessage.querySelector('.message-content').appendChild(tableContainer);
-            }
 
             // Reload chat history to show new/updated chat
             loadChatHistory();

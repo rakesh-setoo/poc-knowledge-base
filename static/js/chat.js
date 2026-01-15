@@ -132,14 +132,55 @@ function createMessageElement(role, content, metadata = null) {
 
   const avatar = role === 'user' ? '👤' : '🤖';
 
-  div.innerHTML = `
-    <div class="message-avatar">${avatar}</div>
-    <div class="message-content">
-      <div class="message-bubble">
-        <p>${role === 'assistant' ? formatAnswer(content) : escapeHtml(content)}</p>
+  // For assistant messages with metadata, structure for viz FIRST
+  if (role === 'assistant' && metadata && metadata.data && metadata.data.length > 0) {
+    div.innerHTML = `
+      <div class="message-avatar">${avatar}</div>
+      <div class="message-content">
+        <div class="message-bubble">
+          <div class="viz-placeholder"></div>
+          <p class="answer-text">${formatAnswer(content)}</p>
+        </div>
       </div>
-    </div>
-  `;
+    `;
+
+    // Render visualization in placeholder
+    const vizType = metadata.viz_type;
+    const columns = metadata.columns;
+    const data = metadata.data;
+
+    setTimeout(() => {
+      const vizPlaceholder = div.querySelector('.viz-placeholder');
+
+      if (shouldRenderChart(vizType, data)) {
+        const vizId = `viz-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        vizPlaceholder.innerHTML = `
+          <div class="viz-wrapper viz-inline">
+            <div class="viz-chart-container" id="${vizId}"></div>
+          </div>
+        `;
+        setTimeout(() => {
+          renderVisualization(vizId, vizType, columns, data);
+        }, 50);
+      } else {
+        vizPlaceholder.innerHTML = `
+          <div class="message-data-table viz-inline">
+            ${renderDataTable(columns, data)}
+          </div>
+        `;
+      }
+    }, 10);
+  } else {
+    // Standard message (user or assistant without data)
+    div.innerHTML = `
+      <div class="message-avatar">${avatar}</div>
+      <div class="message-content">
+        <div class="message-bubble">
+          <p>${role === 'assistant' ? formatAnswer(content) : escapeHtml(content)}</p>
+        </div>
+      </div>
+    `;
+  }
 
   return div;
 }
