@@ -86,6 +86,18 @@ TABLE: {table}
 COLUMNS (with types): {columns_formatted}
 SAMPLE DATA: {json.dumps(table_info['sample_data'][:5], default=str)}{distinct_section}
 {context_section}
+
+UNDERSTAND THE USER'S INTENT FIRST:
+- "distribution" / "breakdown" / "split" → User wants PERCENTAGES, not just values!
+- "trend" / "over time" / "monthly" → User wants TIME SERIES data with proper date ordering
+- "top N" / "best" / "highest" → User wants RANKED list with LIMIT
+- "compare" / "vs" / "versus" → User wants SIDE BY SIDE comparison
+- "total" / "sum" / "overall" → User wants AGGREGATED single value
+- "list" / "show all" / "details" → User wants FULL DATA, not aggregated
+- "average" / "mean" → User wants AVG() calculation
+- "count" / "how many" → User wants COUNT() or COUNT(DISTINCT)
+- "growth" / "change" → User wants DIFFERENCE or percentage change between periods
+
 QUERY PATTERNS (use the appropriate pattern):
 
 1. RANKING ("what rank is X", "position of X"):
@@ -106,10 +118,15 @@ QUERY PATTERNS (use the appropriate pattern):
    SELECT entity, SUM(metric) as total FROM table 
    WHERE entity ILIKE '%X%' OR entity ILIKE '%Y%' GROUP BY entity
 
-4. PERCENTAGE ("% of total", "share"):
+4. PERCENTAGE/DISTRIBUTION ("% of total", "share", "distribution", "breakdown", "split"):
+   CRITICAL: When user asks for "distribution" or "breakdown", ALWAYS calculate percentages!
    SELECT entity, SUM(metric) as value,
-          ROUND((100.0 * SUM(metric) / (SELECT SUM(metric) FROM table))::numeric, 2) as percentage
-   FROM table GROUP BY entity
+          ROUND((100.0 * SUM(metric) / (SELECT SUM(metric) FROM table WHERE fiscal_year = 'FY 2025-26'))::numeric, 2) as percentage
+   FROM table WHERE fiscal_year = 'FY 2025-26' GROUP BY entity ORDER BY percentage DESC
+   
+   Example: "sales distribution by region" should return:
+   - region, total_sales, percentage (NOT just region and total_sales!)
+   - The percentage column is MANDATORY for distribution/breakdown queries
 
 5. FILTERING ("in region X", "where"):
    Use ILIKE '%value%' for text columns, = for exact matches
@@ -119,10 +136,40 @@ QUERY PATTERNS (use the appropriate pattern):
    IMPORTANT: For numeric columns, use them directly - no casting needed!
    Example: AVG(numeric_column), not NULLIF(column,'')::numeric
 
-7. TREND ("by month", "over time"):
-   GROUP BY time_column ORDER BY time_column
+7. COUNTING DISTINCT RECORDS ("how many invoices", "number of orders", "count of transactions"):
+   CRITICAL: When counting invoices/orders/transactions/records from a data table:
+   - ALWAYS use COUNT(DISTINCT id_column) if an ID column exists (like invoice_id, invoice_no, order_id)
+   - COUNT(*) counts ROWS (line items), which inflates the count!
+   - The ID column tells you unique records vs line items
+   Example: SELECT EXTRACT(MONTH FROM date_col) as month, COUNT(DISTINCT invoice_id) as invoices
+            FROM table GROUP BY 1 ORDER BY 1
 
-8. FOLLOW-UP REFERENCES ("the 4th one", "that customer", "details about X"):
+8. TREND ("by month", "over time", "monthly sales"):
+   CRITICAL for correct chart ordering:
+   - ALWAYS ORDER BY the actual date column or date expression, NOT by the formatted text label!
+   - TO_CHAR('Month YYYY') sorts ALPHABETICALLY (April, June, May) - WRONG!
+   - Use: ORDER BY date_column or ORDER BY EXTRACT(MONTH FROM date_column)
+   
+   Example for monthly trend with correct ordering:
+   SELECT TO_CHAR(date_col, 'Month YYYY') as month_year, SUM(amount) as total
+   FROM table 
+   WHERE date_col >= '2025-04-01'
+   GROUP BY TO_CHAR(date_col, 'Month YYYY'), EXTRACT(MONTH FROM date_col)
+   ORDER BY EXTRACT(MONTH FROM date_col)  -- This ensures chronological order!
+   
+   Or use the date directly:
+   SELECT DATE_TRUNC('month', date_col) as month, SUM(amount) as total
+   FROM table GROUP BY 1 ORDER BY 1
+
+   WARNING for TEXT month columns (like 'April 2025'):
+   - Do NOT use TO_DATE with invalid formats like 'MM.Mon' - this causes errors!
+   - If a 'month' column contains TEXT (not date), and you need ordering:
+     * Option 1: Use the actual date column (invoice_date, date, etc.) for aggregation instead
+     * Option 2: Just GROUP BY the text month without complex ordering
+   - Example: SELECT month, SUM(sales) FROM table GROUP BY month
+   - Let the frontend handle display order, or use a simple GROUP BY without risky TO_DATE
+
+9. FOLLOW-UP REFERENCES ("the 4th one", "that customer", "details about X"):
    CRITICAL: If the user refers to a numbered item from previous conversation:
    - Look for the EXACT numbered position in the CONVERSATION CONTEXT above
    - Parse the format: "N. [emoji] **NAME**" -> extract NAME for position N
@@ -135,6 +182,18 @@ IMPORTANT PostgreSQL Rules:
 - For already numeric columns, just use: ROUND(AVG(column)::numeric, 2)
 - Do NOT use NULLIF or empty string checks on numeric columns - they already handle NULL properly
 - Only use NULLIF for TEXT columns that might have empty strings
+- GROUP BY alias restriction (CRITICAL):
+  * PostgreSQL does NOT allow column aliases in GROUP BY clauses!
+  * WRONG: SELECT DATE_TRUNC('month', date_col) AS month ... GROUP BY month
+  * CORRECT: SELECT DATE_TRUNC('month', date_col) AS month ... GROUP BY DATE_TRUNC('month', date_col)
+  * Or use positional reference: GROUP BY 1 (refers to first SELECT column)
+  * ALWAYS repeat the full expression or use positional number, NEVER the alias!
+
+FISCAL YEAR CONTEXT:
+- Current fiscal year is 'FY 2025-26' (April 2025 - March 2026)
+- If the question doesn't specify a time range or fiscal year, ALWAYS filter to current fiscal year
+- Example: "top 10 customers" means "top 10 customers in current fiscal year"
+- Add WHERE fiscal_year = 'FY 2025-26' unless user explicitly asks for "all time" or a different period
 
 QUESTION: {question}
 
@@ -179,9 +238,28 @@ DEFAULT_SYSTEM_PROMPT = """You are an expert Business Analyst Assistant. Your go
     -   `💡 **Key Insights**`
 
 2.  **Numbers**:
-    -   **Currency**: Use Indian format for INR (₹10.5 Lakhs, ₹5.2 Cr).
-    -   **Formatting**: **Bold** all critical numbers so they stand out.
-    -   **Decimals**: Keep to 1 or 2 decimal places.
+    -   **⚠️ CRITICAL - CURRENCY CONVERSION - READ VERY CAREFULLY ⚠️**:
+        -   **1 Crore = 10,000,000** (1 followed by SEVEN zeros)
+        -   **STEP 1**: Take the raw number from data
+        -   **STEP 2**: Divide by 10,000,000 (move decimal point 7 places LEFT)
+        -   **STEP 3**: Round to 2 decimal places
+        
+        **EXAMPLE WITH REAL DATA:**
+        - Raw value: 1,051,504,739 (about 1 billion)
+        - WRONG: 1,051,504,739 / 1,000,000 = 1051.50 ❌ (This is WRONG!)
+        - RIGHT: 1,051,504,739 / 10,000,000 = **105.15 Cr** ✅
+        
+        **ANOTHER EXAMPLE:**
+        - Raw value: 979,609,496
+        - WRONG: 979,609,496 / 1,000,000 = 979.61 ❌
+        - RIGHT: 979,609,496 / 10,000,000 = **97.96 Cr** ✅
+        
+        **RULE: If your Cr value has 3+ digits before decimal (e.g., 105X.XX), you made an error!**
+        
+        **Quick Check:** A 10-digit number should give ~100 Cr, NOT ~1000 Cr!
+    -   **Formatting**: Use ₹X.XX Cr for crores
+    -   **Bold** all critical numbers so they stand out.
+    -   **Decimals**: Keep to 2 decimal places.
 
 3.  **Lists vs Tables**:
     -   Use **Bullet Lists** for hierarchical data (Region -> Manager).
@@ -200,8 +278,35 @@ DEFAULT_SYSTEM_PROMPT = """You are an expert Business Analyst Assistant. Your go
 """
 
 
-def build_answer_prompt(question: str, result_data: list, history_context: str = "", custom_prompt: str = None) -> str:
+def build_answer_prompt(
+    question: str, 
+    result_data: list, 
+    history_context: str = "", 
+    custom_prompt: str = None,
+    viz_type: str = None
+) -> str:
     sample = result_data[:10]
+    
+    # Find a large numeric value from data to show as example
+    conversion_hint = ""
+    for row in sample[:3]:
+        for key, value in row.items():
+            if isinstance(value, (int, float)) or hasattr(value, '__float__'):
+                try:
+                    num = float(value)
+                    if num >= 100_000_000:  # >= 10 Cr (100 million)
+                        correct_cr = num / 10_000_000
+                        conversion_hint = f"""
+**DATA CONVERSION EXAMPLE FROM YOUR DATA:**
+- Raw value in data: {num:,.0f}
+- CORRECT: {num:,.0f} ÷ 10,000,000 = **{correct_cr:.2f} Cr** ✅
+- WRONG: {num:,.0f} ÷ 1,000,000 = {num/1_000_000:.2f} Cr ❌ (THIS IS 10x TOO HIGH!)
+"""
+                        break
+                except (ValueError, TypeError):
+                    pass
+        if conversion_hint:
+            break
     
     # Always use default prompt, add custom instructions on top if provided
     if custom_prompt:
@@ -209,15 +314,77 @@ def build_answer_prompt(question: str, result_data: list, history_context: str =
     else:
         system_instructions = DEFAULT_SYSTEM_PROMPT
     
+    # Add visualization context to prevent duplicate data display
+    viz_instruction = ""
+    if viz_type == "table":
+        viz_instruction = """
+### ⚠️ IMPORTANT: DATA IS ALREADY DISPLAYED AS A TABLE
+The data is already shown as a visual table above. Provide a CONCISE, INSIGHTFUL summary.
+
+**FORMAT YOUR RESPONSE:**
+
+📊 **[Descriptive Title - e.g., "Gross Profit Analysis by Segment (FY 2025-26)"]**
+
+🏆 **Top Performers:**
+1. **[Leader Name]** — ₹XX.XX Cr (XX% of total)
+2. **[Second]** — ₹XX.XX Cr 
+3. **[Third]** — ₹XX.XX Cr
+
+📈 **Key Insights:**
+- [Concentration insight: e.g., "Top 3 segments account for 85% of total profit"]
+- [Comparison insight: e.g., "Automotive is 4x larger than Industrial"]
+- [Gap analysis: e.g., "Significant drop-off after top 2 performers"]
+
+💡 **Business Implication:** [One actionable insight - why this matters for decision-making]
+
+**RULES:**
+- Calculate and show % contribution for top performers
+- Highlight concentration (what % do top 3 account for?)
+- Bold key numbers and names
+- Do NOT repeat the table data
+- Keep to 5-7 lines maximum
+"""
+    elif viz_type in ("bar", "line", "pie"):
+        viz_instruction = f"""
+### ⚠️ IMPORTANT: DATA IS ALREADY DISPLAYED AS A {viz_type.upper()} CHART
+The data is already shown as a visual {viz_type} chart above. Provide a CONCISE, INSIGHTFUL summary.
+
+**FORMAT YOUR RESPONSE:**
+
+📊 **[Descriptive Title - e.g., "Monthly Sales Trend (Apr-Jun 2025)"]**
+
+🔍 **Key Observations:**
+- **[Primary finding]** — ₹XX.XX Cr (include % change if trend data)
+- **[Pattern/Trend]** — [e.g., "Steady 12% month-over-month growth"]
+- **[Notable point]** — [e.g., "June peaked at ₹121.56 Cr, up 15% from April"]
+
+📊 **Breakdown:** (if applicable)
+- Top contributor: **[Name]** at XX% share
+- Combined top 3: XX% of total
+
+💡 **What This Means:** [Business implication - e.g., "Strong Q1 momentum suggests exceeding annual target"]
+
+**INSIGHT FORMULAS TO USE:**
+- Growth: "(B - A) / A × 100 = X% growth"
+- Share: "Value / Total × 100 = X% contribution"
+- Comparison: "A is Xx larger than B"
+
+**RULES:**
+- Always calculate % when showing comparisons
+- Bold the most important numbers
+- State what the numbers MEAN, not just what they are
+- Keep to 5-7 lines maximum
+"""
+    
     return f"""Answer the question in natural language based on the query results below.
 {history_context}
 Question: {question}
 
 Data ({len(result_data)} rows):
-{json.dumps(sample, default=str)}   
-
+{json.dumps(sample, default=str)}
+{conversion_hint}
+{viz_instruction}
 {system_instructions}"""
-# - No markdown tables"""
 
 
 def select_table(question: str, datasets: list, dataset_id: int = None) -> str:

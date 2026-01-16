@@ -10,7 +10,7 @@ services:
     name: millenium-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
-    ipAllowList: [] # Allow all connections (required by Render)
+    ipAllowList: []
 
   # Main Web App
   - type: web

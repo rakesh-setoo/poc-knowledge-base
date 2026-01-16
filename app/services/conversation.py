@@ -65,7 +65,15 @@ def _get_redis_key(chat_id: int) -> str:
     return f"excel_ai:conv:history:chat:{chat_id}"
 
 
-def add_to_history(chat_id: int, question: str, answer: str) -> None:
+def add_to_history(
+    chat_id: int,
+    question: str,
+    answer: str,
+    columns: list = None,
+    data: list = None,
+    viz_type: str = None
+) -> None:
+    """Add a Q&A pair to conversation history with optional visualization data."""
     client = _get_redis_client()
     
     answer_summary = answer[:200] + "..." if len(answer) > 200 else answer
@@ -74,6 +82,15 @@ def add_to_history(chat_id: int, question: str, answer: str) -> None:
         "question": question,
         "answer": answer_summary
     }
+    
+    # Store visualization metadata for chart recreation
+    if viz_type:
+        new_entry["viz_type"] = viz_type
+    if columns:
+        new_entry["columns"] = columns
+    if data:
+        # Limit stored data to 100 rows for performance
+        new_entry["data"] = data[:100] if len(data) > 100 else data
     
     key = _get_redis_key(chat_id)
     history = client.get(key)
@@ -111,6 +128,31 @@ def clear_history(chat_id: int) -> None:
     key = _get_redis_key(chat_id)
     client.delete(key)
     logger.debug(f"Cleared Redis history for chat {chat_id}")
+
+
+def get_last_result(chat_id: int) -> dict:
+    """
+    Get the last query's data for follow-up visualization requests.
+    Returns dict with 'columns', 'data', 'viz_type', 'question' if available.
+    """
+    if not chat_id:
+        return {}
+    
+    try:
+        history = get_history(chat_id)
+        if history:
+            last_entry = history[-1]
+            if last_entry.get('data') and last_entry.get('columns'):
+                return {
+                    'columns': last_entry['columns'],
+                    'data': last_entry['data'],
+                    'viz_type': last_entry.get('viz_type'),
+                    'question': last_entry.get('question', '')
+                }
+    except Exception as e:
+        logger.warning(f"Failed to get last result: {e}")
+    
+    return {}
 
 
 def format_history_for_prompt(chat_id: int) -> str:

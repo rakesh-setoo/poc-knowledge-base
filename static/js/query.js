@@ -88,7 +88,7 @@ async function askQuestion() {
             return;
           }
 
-          // Handle metadata - create assistant message for streaming
+          // Handle metadata - create assistant message and visualization FIRST
           if (data.type === 'metadata') {
             metadataReceived = true;
             resultData = data;
@@ -100,9 +100,61 @@ async function askQuestion() {
 
             loading.classList.remove('show');
 
-            // NOW create the assistant message for streaming (after thinking is done)
-            assistantMessage = addMessageToChat('assistant', '');
-            bubbleP = assistantMessage.querySelector('.message-bubble p');
+            // Create assistant message with structure for viz FIRST, then text
+            assistantMessage = document.createElement('div');
+            assistantMessage.className = 'message assistant';
+            assistantMessage.innerHTML = `
+              <div class="message-avatar">🤖</div>
+              <div class="message-content">
+                <div class="message-bubble">
+                  <div class="viz-placeholder"></div>
+                  <p class="answer-text"></p>
+                </div>
+              </div>
+            `;
+
+            // Show messages container
+            document.getElementById('welcomeScreen').style.display = 'none';
+            const container = document.getElementById('messagesContainer');
+            container.style.display = 'flex';
+            container.appendChild(assistantMessage);
+
+            // Get reference to text paragraph
+            bubbleP = assistantMessage.querySelector('.answer-text');
+
+            // Render visualization IMMEDIATELY (ChatGPT style - viz appears first)
+            if (resultData.data && resultData.data.length > 0) {
+              const vizType = resultData.viz_type || 'table';
+              const columns = resultData.columns;
+              const vizData = resultData.data;
+              const vizPlaceholder = assistantMessage.querySelector('.viz-placeholder');
+
+              if (shouldRenderChart(vizType, vizData)) {
+                // Create chart container directly (no toggle tabs)
+                const vizId = `viz-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                vizPlaceholder.innerHTML = `
+                  <div class="viz-wrapper viz-inline">
+                    <div class="viz-chart-container" id="${vizId}"></div>
+                  </div>
+                `;
+                // Render chart after DOM update
+                setTimeout(() => {
+                  renderVisualization(vizId, vizType, columns, vizData);
+                }, 50);
+              } else if (vizType === 'table') {
+                // Render table only when explicitly requested
+                vizPlaceholder.innerHTML = `
+                  <div class="message-data-table viz-inline">
+                    ${renderDataTable(columns, vizData, true)}
+                  </div>
+                `;
+              } else {
+                // viz_type is 'none' - don't show any visualization
+                vizPlaceholder.innerHTML = '';
+              }
+            }
+
+            scrollToBottom();
           }
 
           // Handle streaming tokens
@@ -116,14 +168,6 @@ async function askQuestion() {
           if (data.type === 'done') {
             // Finalize message (remove cursor)
             bubbleP.innerHTML = formatAnswer(streamedAnswer);
-
-            // Add data table if we have results
-            if (resultData && resultData.data && resultData.data.length > 0) {
-              const tableContainer = document.createElement('div');
-              tableContainer.className = 'message-data-table';
-              tableContainer.innerHTML = renderDataTable(resultData.columns, resultData.data);
-              assistantMessage.querySelector('.message-content').appendChild(tableContainer);
-            }
 
             // Reload chat history to show new/updated chat
             loadChatHistory();
@@ -146,48 +190,158 @@ async function askQuestion() {
 
 /**
  * Render data table HTML
+ * @param {array} columns - Column names
+ * @param {array} data - Data rows
+ * @param {boolean} autoExpand - If true, show table directly without collapse
  */
-function renderDataTable(columns, data) {
+function renderDataTable(columns, data, autoExpand = false) {
   if (!columns || !data || data.length === 0) return '';
 
-  // Limit display to 10 rows with pagination
-  const displayData = data.slice(0, 10);
-  const hasMore = data.length > 10;
+  const previewSize = 10;
+  const pageSize = 20;
+  const totalRows = data.length;
+  const hasMore = totalRows > previewSize;
+  const tableId = `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-  // Wrap in details/summary for default collapsed state
-  let html = `
-  <details class="data-details">
-    <summary class="data-summary">
-      <span class="icon">📋</span>
-      <span>View Table</span>
-    </summary>
-    <div class="data-table-wrapper">
-      <table class="data-table"><thead><tr>`;
+  // Store data for expansion/pagination
+  if (hasMore) {
+    window._tableData = window._tableData || {};
+    window._tableData[tableId] = { columns, data, pageSize, currentPage: 1, expanded: false };
+  }
+
+  let html = '';
+
+  // If autoExpand, show table directly without details wrapper
+  if (autoExpand) {
+    html = `<div class="data-table-container" id="${tableId}-container">`;
+  } else {
+    html = `
+    <details class="data-details">
+      <summary class="data-summary">
+        <span class="icon">📋</span>
+        <span>View Table (${totalRows} rows)</span>
+      </summary>
+      <div class="data-table-container" id="${tableId}-container">`;
+  }
+
+  // Build initial preview (first 10 rows)
+  html += buildTableRows(tableId, columns, data.slice(0, previewSize));
+
+  // Add "View More" button if there's more data
+  if (hasMore) {
+    html += `
+      <div class="table-actions" id="${tableId}-actions">
+        <button class="view-more-btn" onclick="expandTable('${tableId}')">
+          View All ${totalRows} Rows →
+        </button>
+      </div>`;
+  }
+
+  // Close the appropriate wrapper
+  if (autoExpand) {
+    html += '</div>';
+  } else {
+    html += '</div></details>';
+  }
+
+  return html;
+}
+
+/**
+ * Build table HTML with rows
+ */
+function buildTableRows(tableId, columns, rows) {
+  let html = `<div class="data-table-wrapper" id="${tableId}-body"><table class="data-table"><thead><tr>`;
 
   columns.forEach(col => {
-    html += `<th>${escapeHtml(col)}</th>`;
+    html += `<th>${escapeHtml(formatColumnHeader(col))}</th>`;
   });
 
   html += '</tr></thead><tbody>';
 
-  displayData.forEach(row => {
+  rows.forEach(row => {
     html += '<tr>';
     columns.forEach(col => {
-      const value = row[col];
-      html += `<td>${formatCellValue(value)}</td>`;
+      html += `<td>${formatCellValue(row[col])}</td>`;
     });
     html += '</tr>';
   });
 
-  html += '</tbody></table>';
+  html += '</tbody></table></div>';
+  return html;
+}
 
-  if (hasMore) {
-    html += `<div class="table-more">... and ${data.length - 10} more rows</div>`;
+/**
+ * Expand table to show all data with pagination
+ */
+function expandTable(tableId) {
+  const tableData = window._tableData[tableId];
+  if (!tableData) return;
+
+  const { columns, data, pageSize } = tableData;
+  const totalPages = Math.ceil(data.length / pageSize);
+  tableData.expanded = true;
+  tableData.currentPage = 1;
+
+  // Build full paginated view
+  let html = buildTableRows(tableId, columns, data.slice(0, pageSize));
+
+  // Add pagination controls
+  if (totalPages > 1) {
+    html += `
+      <div class="table-pagination" id="${tableId}-pagination">
+        <button class="pagination-btn" onclick="changePage('${tableId}', -1)" id="${tableId}-prev" disabled>← Prev</button>
+        <span class="pagination-info">Page <span id="${tableId}-page">1</span> of ${totalPages}</span>
+        <button class="pagination-btn" onclick="changePage('${tableId}', 1)" id="${tableId}-next">Next →</button>
+      </div>`;
   }
 
-  html += '</div></details>';
+  // Replace content
+  const container = document.getElementById(`${tableId}-container`);
+  if (container) {
+    container.innerHTML = html;
+  }
+}
 
-  return html;
+/**
+ * Change table page
+ */
+function changePage(tableId, direction) {
+  const tableData = window._tableData[tableId];
+  if (!tableData) return;
+
+  const { columns, data, pageSize } = tableData;
+  const totalPages = Math.ceil(data.length / pageSize);
+
+  tableData.currentPage += direction;
+  tableData.currentPage = Math.max(1, Math.min(tableData.currentPage, totalPages));
+
+  const startIdx = (tableData.currentPage - 1) * pageSize;
+  const pageData = data.slice(startIdx, startIdx + pageSize);
+
+  // Update table body
+  const bodyContainer = document.getElementById(`${tableId}-body`);
+  if (bodyContainer) {
+    bodyContainer.outerHTML = buildTableRows(tableId, columns, pageData);
+  }
+
+  // Update pagination state
+  document.getElementById(`${tableId}-page`).textContent = tableData.currentPage;
+  document.getElementById(`${tableId}-prev`).disabled = tableData.currentPage === 1;
+  document.getElementById(`${tableId}-next`).disabled = tableData.currentPage === totalPages;
+}
+
+/**
+ * Format column header for display (snake_case -> Title Case)
+ */
+function formatColumnHeader(col) {
+  if (!col) return '';
+  return col
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .replace(/Inr/g, '(INR)')
+    .replace(/Pct/g, '%')
+    .replace(/Qty/g, 'Quantity');
 }
 
 /**
@@ -195,10 +349,30 @@ function renderDataTable(columns, data) {
  */
 function formatCellValue(value) {
   if (value === null || value === undefined) return '<span class="null-value">-</span>';
-  if (typeof value === 'number') {
-    // Format numbers with commas
-    return value.toLocaleString();
+
+  // Handle numbers
+  if (typeof value === 'number' || (typeof value === 'string' && !isNaN(parseFloat(value)) && value.match(/^-?\d+\.?\d*$/))) {
+    const num = parseFloat(value);
+
+    // Format large numbers as Crores
+    if (Math.abs(num) >= 10000000) {
+      return `₹${(num / 10000000).toFixed(2)} Cr`;
+    }
+    // Format medium numbers as Lakhs
+    if (Math.abs(num) >= 100000) {
+      return `₹${(num / 100000).toFixed(2)} L`;
+    }
+    // Format with commas for smaller numbers
+    if (Number.isInteger(num)) {
+      return num.toLocaleString('en-IN');
+    }
+    // Decimal numbers - check if it looks like a percentage
+    if (Math.abs(num) <= 100 && num !== Math.floor(num)) {
+      return `${num.toFixed(2)}%`;
+    }
+    return num.toLocaleString('en-IN', { maximumFractionDigits: 2 });
   }
+
   return escapeHtml(String(value));
 }
 
