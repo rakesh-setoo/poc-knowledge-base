@@ -140,22 +140,26 @@ async def ask_question_stream(
                     }
                     yield f"data: {json.dumps(metadata, default=str)}\n\n"
                     
-                    # Generate summary for the new visualization (use sync call)
+                    # Generate summary for the new visualization with streaming
                     history_context = format_history_for_prompt(chat_id)
                     answer_prompt = build_answer_prompt(
                         f"Showing previous data as {viz_type} chart: {last_result.get('question', question)}", 
                         result_data, history_context, system_prompt, viz_type
                     )
                     
-                    # Use synchronous LLM call for simplicity
-                    full_answer = llm_call(answer_prompt, max_tokens=1500)
-                    yield f"data: {json.dumps({'type': 'token', 'content': full_answer})}\n\n"
+                    # Stream the LLM response
+                    full_answer = []
+                    for token in llm_call_stream(answer_prompt, max_tokens=1500):
+                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                        full_answer.append(token)
+                    
+                    answer_text = "".join(full_answer)
                     
                     # Save the summary
-                    add_message(chat_id, "assistant", full_answer, {
+                    add_message(chat_id, "assistant", answer_text, {
                         "columns": columns, "data": result_data, "viz_type": viz_type
                     })
-                    add_to_history(chat_id, question, full_answer, columns, result_data, viz_type)
+                    add_to_history(chat_id, question, answer_text, columns, result_data, viz_type)
                     
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
                     return
