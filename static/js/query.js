@@ -142,10 +142,11 @@ async function askQuestion() {
                   renderVisualization(vizId, vizType, columns, vizData);
                 }, 50);
               } else {
-                // Render table directly
+                // Render table directly - autoExpand when viz_type is explicitly 'table'
+                const autoExpand = (vizType === 'table');
                 vizPlaceholder.innerHTML = `
                   <div class="message-data-table viz-inline">
-                    ${renderDataTable(columns, vizData)}
+                    ${renderDataTable(columns, vizData, autoExpand)}
                   </div>
                 `;
               }
@@ -187,23 +188,33 @@ async function askQuestion() {
 
 /**
  * Render data table HTML
+ * @param {array} columns - Column names
+ * @param {array} data - Data rows
+ * @param {boolean} autoExpand - If true, show table directly without collapse
  */
-function renderDataTable(columns, data) {
+function renderDataTable(columns, data, autoExpand = false) {
   if (!columns || !data || data.length === 0) return '';
 
   // Limit display to 10 rows with pagination
   const displayData = data.slice(0, 10);
   const hasMore = data.length > 10;
 
-  // Wrap in details/summary for default collapsed state
-  let html = `
-  <details class="data-details">
-    <summary class="data-summary">
-      <span class="icon">📋</span>
-      <span>View Table</span>
-    </summary>
-    <div class="data-table-wrapper">
-      <table class="data-table"><thead><tr>`;
+  let html = '';
+
+  // If autoExpand, show table directly without details wrapper
+  if (autoExpand) {
+    html = `<div class="data-table-wrapper"><table class="data-table"><thead><tr>`;
+  } else {
+    // Wrap in details/summary for collapsed state
+    html = `
+    <details class="data-details">
+      <summary class="data-summary">
+        <span class="icon">📋</span>
+        <span>View Table</span>
+      </summary>
+      <div class="data-table-wrapper">
+        <table class="data-table"><thead><tr>`;
+  }
 
   columns.forEach(col => {
     html += `<th>${escapeHtml(col)}</th>`;
@@ -226,7 +237,12 @@ function renderDataTable(columns, data) {
     html += `<div class="table-more">... and ${data.length - 10} more rows</div>`;
   }
 
-  html += '</div></details>';
+  // Close the appropriate wrapper
+  if (autoExpand) {
+    html += '</div>';
+  } else {
+    html += '</div></details>';
+  }
 
   return html;
 }

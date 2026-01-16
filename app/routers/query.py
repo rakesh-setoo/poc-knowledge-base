@@ -139,11 +139,6 @@ async def ask_question_stream(
             
             result_data = [dict(zip(columns, row)) for row in rows]
             
-            # DEBUG: Log the SQL and raw results for troubleshooting
-            logger.info(f"[DEBUG SQL] Generated: {validated_sql}")
-            logger.info(f"[DEBUG DATA] Columns: {columns}")
-            logger.info(f"[DEBUG DATA] First 3 rows: {result_data[:3]}")
-            
             # Convert non-JSON-serializable types (Decimal, datetime, etc.)
             for row_dict in result_data:
                 for key, value in row_dict.items():
@@ -172,8 +167,10 @@ async def ask_question_stream(
             # Phase 8: Stream answer generation with conversation history
             phase_start = time.time()
             
-            # Build answer prompt with optional custom system instructions
-            answer_prompt = build_answer_prompt(question, result_data, history_context, system_prompt)
+            # Build answer prompt with optional custom system instructions and viz context
+            answer_prompt = build_answer_prompt(
+                question, result_data, history_context, system_prompt, viz_type
+            )
             
             token_count = 0
             full_answer = []  # Collect answer for history storage

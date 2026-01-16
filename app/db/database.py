@@ -99,7 +99,6 @@ def init_chat_tables():
             """))
             
             conn.commit()
-            logger.info("Chat tables initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize chat tables: {e}")
         raise

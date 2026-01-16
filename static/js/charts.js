@@ -12,13 +12,26 @@ const CHART_COLORS = {
   warning: 'rgba(245, 158, 11, 0.8)',
   error: 'rgba(239, 68, 68, 0.8)',
   palette: [
-    'rgba(99, 102, 241, 0.8)',
-    'rgba(139, 92, 246, 0.8)',
-    'rgba(16, 185, 129, 0.8)',
-    'rgba(245, 158, 11, 0.8)',
-    'rgba(236, 72, 153, 0.8)',
-    'rgba(6, 182, 212, 0.8)',
-    'rgba(251, 146, 60, 0.8)'
+    'rgba(99, 102, 241, 0.8)',   // Indigo
+    'rgba(139, 92, 246, 0.8)',   // Purple
+    'rgba(16, 185, 129, 0.8)',   // Emerald
+    'rgba(245, 158, 11, 0.8)',   // Amber
+    'rgba(236, 72, 153, 0.8)',   // Pink
+    'rgba(6, 182, 212, 0.8)',    // Cyan
+    'rgba(251, 146, 60, 0.8)',   // Orange
+    'rgba(34, 197, 94, 0.8)',    // Green
+    'rgba(168, 85, 247, 0.8)',   // Violet
+    'rgba(59, 130, 246, 0.8)',   // Blue
+    'rgba(249, 115, 22, 0.8)',   // Deep Orange
+    'rgba(20, 184, 166, 0.8)',   // Teal
+    'rgba(244, 63, 94, 0.8)',    // Rose
+    'rgba(132, 204, 22, 0.8)',   // Lime
+    'rgba(217, 70, 239, 0.8)',   // Fuchsia
+    'rgba(14, 165, 233, 0.8)',   // Sky Blue
+    'rgba(234, 179, 8, 0.8)',    // Yellow
+    'rgba(168, 162, 158, 0.8)',  // Stone
+    'rgba(96, 165, 250, 0.8)',   // Light Blue
+    'rgba(74, 222, 128, 0.8)'    // Light Green
   ]
 };
 
@@ -88,15 +101,29 @@ function renderVisualization(containerId, vizType, columns, data) {
  * Render a bar chart
  */
 function renderBarChart(ctx, columns, data) {
-  const labels = data.slice(0, 20).map(row => truncateLabel(row[columns[0]]));
-  const values = data.slice(0, 20).map(row => parseNumeric(row[columns[1]]));
+  // Find the value column (last column that contains numeric data)
+  let valueColIndex = columns.length - 1;
+  let valueCol = columns[valueColIndex];
+
+  // For multi-column data, combine non-value columns as label
+  let labelCols = columns.slice(0, valueColIndex);
+
+  const labels = data.slice(0, 20).map(row => {
+    if (labelCols.length > 1) {
+      // Combine multiple label columns
+      return labelCols.map(col => truncateLabel(row[col], 10)).join(' - ');
+    }
+    return truncateLabel(row[columns[0]]);
+  });
+
+  const values = data.slice(0, 20).map(row => parseNumeric(row[valueCol]));
 
   return new Chart(ctx, {
     type: 'bar',
     data: {
       labels: labels,
       datasets: [{
-        label: columns[1] || 'Value',
+        label: valueCol || 'Value',
         data: values,
         backgroundColor: CHART_COLORS.palette,
         borderColor: CHART_COLORS.palette.map(c => c.replace('0.8', '1')),
@@ -104,7 +131,7 @@ function renderBarChart(ctx, columns, data) {
         borderRadius: 6
       }]
     },
-    options: getChartOptions('bar', columns[1], columns[0])
+    options: getChartOptions('bar', valueCol, labelCols.join(' & '))
   });
 }
 
@@ -142,8 +169,12 @@ function renderLineChart(ctx, columns, data) {
  * Render a pie chart
  */
 function renderPieChart(ctx, columns, data) {
-  const labels = data.slice(0, 7).map(row => truncateLabel(row[columns[0]]));
-  const values = data.slice(0, 7).map(row => parseNumeric(row[columns[1]]));
+  // Show all categories with full labels
+  const labels = data.map(row => String(row[columns[0]] || ''));
+  const values = data.map(row => parseNumeric(row[columns[1]]));
+
+  // Calculate total for percentage
+  const total = values.reduce((sum, val) => sum + val, 0);
 
   return new Chart(ctx, {
     type: 'doughnut',
@@ -163,12 +194,45 @@ function renderPieChart(ctx, columns, data) {
         legend: {
           position: 'right',
           labels: {
-            color: 'rgba(255, 255, 255, 0.8)',
-            padding: 15,
-            font: { size: 12 }
+            color: '#ffffff',  // Pure white text
+            padding: 10,
+            font: { size: 11 },
+            boxWidth: 12,
+            // Show percentage in legend
+            generateLabels: function (chart) {
+              const data = chart.data;
+              if (data.labels.length && data.datasets.length) {
+                return data.labels.map((label, i) => {
+                  const value = data.datasets[0].data[i];
+                  const percentage = ((value / total) * 100).toFixed(1);
+                  return {
+                    text: `${label} (${percentage}%)`,
+                    fillStyle: data.datasets[0].backgroundColor[i],
+                    fontColor: '#ffffff',
+                    hidden: false,
+                    index: i
+                  };
+                });
+              }
+              return [];
+            }
           }
         },
-        tooltip: getTooltipConfig()
+        tooltip: {
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          titleColor: 'rgba(255, 255, 255, 0.9)',
+          bodyColor: 'rgba(255, 255, 255, 0.8)',
+          borderColor: 'rgba(139, 92, 246, 0.5)',
+          borderWidth: 1,
+          padding: 12,
+          callbacks: {
+            label: function (context) {
+              const value = context.parsed;
+              const percentage = ((value / total) * 100).toFixed(1);
+              return `${context.label}: ${percentage}%`;
+            }
+          }
+        }
       }
     }
   });

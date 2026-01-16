@@ -163,9 +163,11 @@ function createMessageElement(role, content, metadata = null) {
           renderVisualization(vizId, vizType, columns, data);
         }, 50);
       } else {
+        // autoExpand when viz_type is explicitly 'table'
+        const autoExpand = (vizType === 'table');
         vizPlaceholder.innerHTML = `
           <div class="message-data-table viz-inline">
-            ${renderDataTable(columns, data)}
+            ${renderDataTable(columns, data, autoExpand)}
           </div>
         `;
       }

@@ -10,6 +10,10 @@
 
 .viz-placeholder {
   margin-bottom: 1rem;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 /* Answer text below visualization */
@@ -31,6 +35,9 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   overflow: hidden;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* Toggle buttons */
@@ -72,10 +79,15 @@
   padding: 1rem;
   min-height: 280px;
   max-height: 400px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .chart-canvas {
   width: 100% !important;
+  max-width: 100% !important;
   height: 260px !important;
 }
 

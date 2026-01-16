@@ -67,6 +67,28 @@ DATE_COLUMN_PATTERNS = [
     r'quarter', r'created', r'updated', r'timestamp'
 ]
 
+# Currency column patterns (names suggesting money values)
+CURRENCY_COLUMN_PATTERNS = [
+    r'amount', r'sales', r'revenue', r'price', r'cost', r'profit',
+    r'value', r'total', r'gross', r'net', r'margin', r'budget',
+    r'income', r'expense', r'payment', r'invoice'
+]
+
+# Percentage column patterns
+PERCENTAGE_COLUMN_PATTERNS = [
+    r'percent', r'percentage', r'rate', r'ratio', r'share',
+    r'proportion', r'pct', r'growth', r'change'
+]
+
+# Sequential time indicators (values that suggest time series)
+SEQUENTIAL_PATTERNS = [
+    r'^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)',
+    r'^\d{4}[-/]\d{2}',  # 2024-01, 2024/01
+    r'^q[1-4]',  # Q1, Q2, Q3, Q4
+    r'^(fy\s*\d+|fiscal)',  # FY 2025, Fiscal Year
+    r'^\d{4}$',  # Year only: 2024, 2025
+]
+
 
 def _matches_patterns(text: str, patterns: list) -> bool:
     """Check if text matches any of the regex patterns."""
@@ -108,6 +130,55 @@ def _get_category_count(data: list, column: str) -> int:
     return len(unique_values)
 
 
+def _is_currency_column(column: str) -> bool:
+    """Check if column name suggests currency/money values."""
+    col_lower = column.lower()
+    return any(re.search(p, col_lower) for p in CURRENCY_COLUMN_PATTERNS)
+
+
+def _is_percentage_column(column: str, data: list = None) -> bool:
+    """Check if column contains percentage values."""
+    col_lower = column.lower()
+    # Check column name
+    if any(re.search(p, col_lower) for p in PERCENTAGE_COLUMN_PATTERNS):
+        return True
+    # Check if values are in 0-100 range (likely percentages)
+    if data:
+        values = [row.get(column) for row in data[:10] if row.get(column) is not None]
+        if values and all(isinstance(v, (int, float)) for v in values):
+            if all(0 <= v <= 100 for v in values):
+                return True
+    return False
+
+
+def _is_sequential_data(data: list, column: str) -> bool:
+    """Check if first column contains sequential/time-series values."""
+    if not data or len(data) < 3:
+        return False
+    
+    values = [str(row.get(column, '')).lower() for row in data[:10]]
+    
+    # Check if values match sequential patterns (months, quarters, years)
+    for pattern in SEQUENTIAL_PATTERNS:
+        matches = sum(1 for v in values if re.search(pattern, v))
+        if matches >= len(values) * 0.5:  # At least 50% match
+            return True
+    
+    return False
+
+
+def _values_sum_to_100(data: list, column: str) -> bool:
+    """Check if numeric values approximately sum to 100 (pie chart suitable)."""
+    if not data:
+        return False
+    total = 0
+    for row in data:
+        val = row.get(column)
+        if isinstance(val, (int, float)):
+            total += val
+    return 95 <= total <= 105  # Allow some tolerance
+
+
 def detect_visualization_type(
     question: str,
     columns: list[str],
@@ -133,17 +204,23 @@ def detect_visualization_type(
     # Priority 1: Explicit chart type requests from user
     if any(x in question_lower for x in ['pie chart', 'pie graph', 'in pie', 'as pie']):
         if row_count >= 2:
-            logger.debug(f"Explicit pie chart request: {question[:50]}")
+            logger.debug("Explicit pie chart request: %s", question[:50])
+            return "pie"
+    
+    # 'Distribution' and 'breakdown' imply pie charts
+    if any(x in question_lower for x in ['distribution', 'breakdown', 'split by', 'share by']):
+        if 2 <= row_count <= 15:
+            logger.debug("Distribution query -> pie chart: %s", question[:50])
             return "pie"
     
     if any(x in question_lower for x in ['line chart', 'line graph', 'in line', 'as line']):
         if row_count >= 2:
-            logger.debug(f"Explicit line chart request: {question[:50]}")
+            logger.debug("Explicit line chart request: %s", question[:50])
             return "line"
     
     if any(x in question_lower for x in ['bar chart', 'bar graph', 'in bar', 'as bar']):
         if row_count >= 2:
-            logger.debug(f"Explicit bar chart request: {question[:50]}")
+            logger.debug("Explicit bar chart request: %s", question[:50])
             return "bar"
     
     # Explicit table/tabular format request - expanded patterns
@@ -165,33 +242,28 @@ def detect_visualization_type(
     row_count = len(data)
     col_count = len(columns) if columns else 0
     
-    # Single value detection
+    # Single value detection - for aggregate queries like "total", "sum", "average"
     if row_count == 1 and col_count <= 2:
-        # Check if it's a single aggregate result
-        if col_count == 1:
-            return "single_value"
-        # If 2 columns and second is numeric, likely single aggregate
-        if col_count == 2 and _is_numeric_column(data, columns[1]):
-            values = [row.get(columns[1]) for row in data if row.get(columns[1])]
-            if len(values) == 1:
-                return "single_value"
+        # 1 row with 1-2 columns is a single aggregate result
+        # Return 'none' to not show any visualization, just text answer
+        return "none"
     
     # Line chart: time-based trends
     if _matches_patterns(question, LINE_CHART_PATTERNS):
         if _has_date_column(columns) or row_count >= 3:
-            logger.debug(f"Detected line chart for: {question[:50]}")
+            logger.debug("Detected line chart for: %s", question[:50])
             return "line"
     
     # Pie chart: distribution/breakdown (works best with 2-7 categories)
     if _matches_patterns(question, PIE_CHART_PATTERNS):
         if 2 <= row_count <= 7 and col_count >= 2:
-            logger.debug(f"Detected pie chart for: {question[:50]}")
+            logger.debug("Detected pie chart for: %s", question[:50])
             return "pie"
     
     # Bar chart: comparisons, rankings, top-N
     if _matches_patterns(question, BAR_CHART_PATTERNS):
         if row_count >= 2 and col_count >= 2:
-            logger.debug(f"Detected bar chart for: {question[:50]}")
+            logger.debug("Detected bar chart for: %s", question[:50])
             return "bar"
     
     # Auto-detect based on data structure
@@ -199,11 +271,23 @@ def detect_visualization_type(
         first_col = columns[0]
         second_col = columns[1] if col_count > 1 else None
         
+        # Check for sequential/time-series data -> line chart
+        if second_col and _is_sequential_data(data, first_col):
+            if _is_numeric_column(data, second_col) and row_count >= 3:
+                logger.debug("Auto-detected line chart from sequential data")
+                return "line"
+        
         # If first column is date-like and we have numeric data, use line
         if _has_date_column([first_col]) and second_col:
             if _is_numeric_column(data, second_col) and row_count >= 3:
-                logger.debug("Auto-detected line chart from data structure")
+                logger.debug("Auto-detected line chart from date structure")
                 return "line"
+        
+        # If values sum to ~100% and few categories -> pie chart
+        if second_col and _is_percentage_column(second_col, data):
+            if 2 <= row_count <= 7 and _values_sum_to_100(data, second_col):
+                logger.debug("Auto-detected pie chart from percentage data")
+                return "pie"
         
         # If categorical + numeric with few rows, use bar
         if second_col and _is_numeric_column(data, second_col):
