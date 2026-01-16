@@ -319,46 +319,61 @@ def build_answer_prompt(
     if viz_type == "table":
         viz_instruction = """
 ### ⚠️ IMPORTANT: DATA IS ALREADY DISPLAYED AS A TABLE
-The data is already shown as a visual table above. Your response should be a well-formatted SUMMARY only.
+The data is already shown as a visual table above. Provide a CONCISE, INSIGHTFUL summary.
 
-**FORMAT YOUR RESPONSE LIKE THIS:**
-📊 **[Title describing what this data shows]**
+**FORMAT YOUR RESPONSE:**
 
-🏆 **Key Highlights:**
-- **[Top performer]** leads with **₹XX.XX Cr**
-- [Second place] follows with ₹XX.XX Cr
-- Total of [N] entries shown
+📊 **[Descriptive Title - e.g., "Gross Profit Analysis by Segment (FY 2025-26)"]**
 
-💡 **Insight:** [Two sentence insight about the data pattern or significance]
+🏆 **Top Performers:**
+1. **[Leader Name]** — ₹XX.XX Cr (XX% of total)
+2. **[Second]** — ₹XX.XX Cr 
+3. **[Third]** — ₹XX.XX Cr
+
+📈 **Key Insights:**
+- [Concentration insight: e.g., "Top 3 segments account for 85% of total profit"]
+- [Comparison insight: e.g., "Automotive is 4x larger than Industrial"]
+- [Gap analysis: e.g., "Significant drop-off after top 2 performers"]
+
+💡 **Business Implication:** [One actionable insight - why this matters for decision-making]
 
 **RULES:**
-- Use emojis to make it visually appealing (📊, 🏆, 💡, 📈, etc.)
-- Bold the important numbers and names
-- Keep it to 3-5 lines maximum
-- Do NOT create markdown tables or list all rows
-- Do NOT repeat what's visible in the table
+- Calculate and show % contribution for top performers
+- Highlight concentration (what % do top 3 account for?)
+- Bold key numbers and names
+- Do NOT repeat the table data
+- Keep to 5-7 lines maximum
 """
     elif viz_type in ("bar", "line", "pie"):
         viz_instruction = f"""
 ### ⚠️ IMPORTANT: DATA IS ALREADY DISPLAYED AS A {viz_type.upper()} CHART
-The data is already shown as a visual {viz_type} chart above. Your response should be a well-formatted SUMMARY only.
+The data is already shown as a visual {viz_type} chart above. Provide a CONCISE, INSIGHTFUL summary.
 
-**FORMAT YOUR RESPONSE LIKE THIS:**
-📊 **[Title describing what the chart shows]**
+**FORMAT YOUR RESPONSE:**
+
+📊 **[Descriptive Title - e.g., "Monthly Sales Trend (Apr-Jun 2025)"]**
 
 🔍 **Key Observations:**
-- **[Most significant finding]** with value ₹XX.XX Cr
-- [Trend or pattern observed]
-- [Comparison or contrast if applicable]
+- **[Primary finding]** — ₹XX.XX Cr (include % change if trend data)
+- **[Pattern/Trend]** — [e.g., "Steady 12% month-over-month growth"]
+- **[Notable point]** — [e.g., "June peaked at ₹121.56 Cr, up 15% from April"]
 
-💡 **Insight:** [two sentence explaining the business significance]
+📊 **Breakdown:** (if applicable)
+- Top contributor: **[Name]** at XX% share
+- Combined top 3: XX% of total
+
+💡 **What This Means:** [Business implication - e.g., "Strong Q1 momentum suggests exceeding annual target"]
+
+**INSIGHT FORMULAS TO USE:**
+- Growth: "(B - A) / A × 100 = X% growth"
+- Share: "Value / Total × 100 = X% contribution"
+- Comparison: "A is Xx larger than B"
 
 **RULES:**
-- Use emojis to make it visually appealing (📊, 📈, 📉, 🔥, 💡, etc.)  
-- Bold the key numbers and names
-- Focus on trends, patterns, and insights
-- Keep it to 3-5 lines maximum
-- Do NOT create tables or list all data points
+- Always calculate % when showing comparisons
+- Bold the most important numbers
+- State what the numbers MEAN, not just what they are
+- Keep to 5-7 lines maximum
 """
     
     return f"""Answer the question in natural language based on the query results below.

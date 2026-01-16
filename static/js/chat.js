@@ -162,14 +162,16 @@ function createMessageElement(role, content, metadata = null) {
         setTimeout(() => {
           renderVisualization(vizId, vizType, columns, data);
         }, 50);
-      } else {
-        // autoExpand when viz_type is explicitly 'table'
-        const autoExpand = (vizType === 'table');
+      } else if (vizType === 'table') {
+        // Render table only when explicitly requested
         vizPlaceholder.innerHTML = `
           <div class="message-data-table viz-inline">
-            ${renderDataTable(columns, data, autoExpand)}
+            ${renderDataTable(columns, data, true)}
           </div>
         `;
+      } else {
+        // viz_type is 'none' - don't show any visualization
+        vizPlaceholder.innerHTML = '';
       }
     }, 10);
   } else {

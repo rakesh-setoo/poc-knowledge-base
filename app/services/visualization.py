@@ -185,7 +185,7 @@ def detect_visualization_type(
     data: list[dict[str, Any]]
 ) -> str:
     """
-    Auto-detect the best visualization type based on question and data.
+    Detect visualization type ONLY when user explicitly requests it.
     
     Args:
         question: The user's natural language question
@@ -193,112 +193,62 @@ def detect_visualization_type(
         data: List of result rows as dictionaries
     
     Returns:
-        Visualization type: 'bar', 'line', 'pie', 'single_value', or 'table'
+        Visualization type: 'bar', 'line', 'pie', 'table', or 'none'
     """
     if not data:
-        return "table"
+        return "none"
     
     question_lower = question.lower()
     row_count = len(data)
     
-    # Priority 1: Explicit chart type requests from user
+    # Only show visualizations when user EXPLICITLY asks for them
+    
+    # 1. Explicit PIE CHART request
     if any(x in question_lower for x in ['pie chart', 'pie graph', 'in pie', 'as pie']):
         if row_count >= 2:
-            logger.debug("Explicit pie chart request: %s", question[:50])
+            logger.debug("Explicit pie chart request")
             return "pie"
     
-    # 'Distribution' and 'breakdown' imply pie charts
-    if any(x in question_lower for x in ['distribution', 'breakdown', 'split by', 'share by']):
-        if 2 <= row_count <= 15:
-            logger.debug("Distribution query -> pie chart: %s", question[:50])
-            return "pie"
-    
+    # 2. Explicit LINE CHART request
     if any(x in question_lower for x in ['line chart', 'line graph', 'in line', 'as line']):
         if row_count >= 2:
-            logger.debug("Explicit line chart request: %s", question[:50])
+            logger.debug("Explicit line chart request")
             return "line"
     
+    # 3. Explicit BAR CHART request
     if any(x in question_lower for x in ['bar chart', 'bar graph', 'in bar', 'as bar']):
         if row_count >= 2:
-            logger.debug("Explicit bar chart request: %s", question[:50])
+            logger.debug("Explicit bar chart request")
             return "bar"
     
-    # Explicit table/tabular format request - expanded patterns
+    # 4. Generic "graph" or "chart" request - default to bar
+    if any(x in question_lower for x in [' graph', ' chart', 'visuali', 'visualise', 'visualize']):
+        if row_count >= 2:
+            logger.debug("Generic chart request -> bar chart")
+            return "bar"
+    
+    # 5. Explicit TABLE request
     table_keywords = [
         'tabular', 'table format', 'in table', 'as table', 'show table',
         'list all', 'show all', 'all details', 'full list', 'complete list',
-        'raw data', 'detailed view', 'spreadsheet', 'export'
+        'raw data', 'detailed view', 'spreadsheet', 'export', 'data view'
     ]
     if any(x in question_lower for x in table_keywords):
-        logger.debug(f"Explicit table request: {question[:50]}")
+        logger.debug("Explicit table request")
         return "table"
     
-    # Generic "graph" or "chart" request - use bar chart as default
-    if any(x in question_lower for x in [' graph', ' chart', 'visuali']):
-        if row_count >= 2:
-            logger.debug(f"Generic chart request, using bar: {question[:50]}")
-            return "bar"
+    # 6. "Top N" requests where N > 10 should show as table
+    import re
+    top_n_match = re.search(r'top\s+(\d+)', question_lower)
+    if top_n_match:
+        requested_count = int(top_n_match.group(1))
+        if requested_count > 10:
+            logger.debug("Top %d request -> table for full visibility", requested_count)
+            return "table"
     
-    row_count = len(data)
-    col_count = len(columns) if columns else 0
-    
-    # Single value detection - for aggregate queries like "total", "sum", "average"
-    if row_count == 1 and col_count <= 2:
-        # 1 row with 1-2 columns is a single aggregate result
-        # Return 'none' to not show any visualization, just text answer
-        return "none"
-    
-    # Line chart: time-based trends
-    if _matches_patterns(question, LINE_CHART_PATTERNS):
-        if _has_date_column(columns) or row_count >= 3:
-            logger.debug("Detected line chart for: %s", question[:50])
-            return "line"
-    
-    # Pie chart: distribution/breakdown (works best with 2-7 categories)
-    if _matches_patterns(question, PIE_CHART_PATTERNS):
-        if 2 <= row_count <= 7 and col_count >= 2:
-            logger.debug("Detected pie chart for: %s", question[:50])
-            return "pie"
-    
-    # Bar chart: comparisons, rankings, top-N
-    if _matches_patterns(question, BAR_CHART_PATTERNS):
-        if row_count >= 2 and col_count >= 2:
-            logger.debug("Detected bar chart for: %s", question[:50])
-            return "bar"
-    
-    # Auto-detect based on data structure
-    if col_count >= 2:
-        first_col = columns[0]
-        second_col = columns[1] if col_count > 1 else None
-        
-        # Check for sequential/time-series data -> line chart
-        if second_col and _is_sequential_data(data, first_col):
-            if _is_numeric_column(data, second_col) and row_count >= 3:
-                logger.debug("Auto-detected line chart from sequential data")
-                return "line"
-        
-        # If first column is date-like and we have numeric data, use line
-        if _has_date_column([first_col]) and second_col:
-            if _is_numeric_column(data, second_col) and row_count >= 3:
-                logger.debug("Auto-detected line chart from date structure")
-                return "line"
-        
-        # If values sum to ~100% and few categories -> pie chart
-        if second_col and _is_percentage_column(second_col, data):
-            if 2 <= row_count <= 7 and _values_sum_to_100(data, second_col):
-                logger.debug("Auto-detected pie chart from percentage data")
-                return "pie"
-        
-        # If categorical + numeric with few rows, use bar
-        if second_col and _is_numeric_column(data, second_col):
-            category_count = _get_category_count(data, first_col)
-            if 2 <= category_count <= 15:
-                logger.debug("Auto-detected bar chart from data structure")
-                return "bar"
-    
-    # Default to table for complex or large datasets
-    logger.debug(f"Defaulting to table for: {question[:50]}")
-    return "table"
+    # Default: No visualization, just text answer
+    logger.debug("No explicit visualization request -> text only")
+    return "none"
 
 
 def get_chart_config(

@@ -1,5 +1,6 @@
 import time
 import json
+import re
 from decimal import Decimal
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -8,7 +9,7 @@ from app.routers.datasets import get_datasets
 from app.services.query import (
     get_table_info, build_sql_prompt, build_answer_prompt, select_table
 )
-from app.services.conversation import add_to_history, format_history_for_prompt
+from app.services.conversation import add_to_history, format_history_for_prompt, get_last_result
 from app.services.visualization import detect_visualization_type
 from app.services.chat import add_message, get_messages, create_chat, auto_generate_title, get_chat
 from app.services.settings import get_global_system_prompt
@@ -19,6 +20,40 @@ from app.logging import NoDatasetError, SQLValidationError, SQLExecutionError, L
 
 
 router = APIRouter(tags=["Query"])
+
+
+def is_visualization_only_request(question: str) -> str:
+    """
+    Detect if user is asking to change visualization of previous data.
+    Returns the requested viz type if so, None otherwise.
+    """
+    q = question.lower().strip()
+    
+    # Patterns that indicate user wants to RE-VISUALIZE previous data
+    viz_only_patterns = [
+        (r'^show\s+(me\s+)?(it\s+)?(in|as)\s+(?:a\s+)?line', 'line'),
+        (r'^show\s+(me\s+)?(it\s+)?(in|as)\s+(?:a\s+)?bar', 'bar'),
+        (r'^show\s+(me\s+)?(it\s+)?(in|as)\s+(?:a\s+)?pie', 'pie'),
+        (r'^show\s+(me\s+)?(it\s+)?(in|as)\s+(?:a\s+)?table', 'table'),
+        (r'^display\s+(it\s+)?(in|as)\s+(?:a\s+)?line', 'line'),
+        (r'^display\s+(it\s+)?(in|as)\s+(?:a\s+)?bar', 'bar'),
+        (r'^(?:can you\s+)?show\s+(?:me\s+)?(?:this|that)\s+in\s+(?:a\s+)?(\w+)\s+chart', None),
+        (r'^(?:convert|change)\s+(?:to|into)\s+(?:a\s+)?(\w+)\s+chart', None),
+    ]
+    
+    for pattern, viz_type in viz_only_patterns:
+        match = re.search(pattern, q)
+        if match:
+            if viz_type:
+                return viz_type
+            # Extract chart type from match group if not hardcoded
+            if match.groups():
+                chart_type = match.group(len(match.groups()))
+                if chart_type in ['line', 'bar', 'pie']:
+                    return chart_type
+            return 'bar'  # Default to bar
+    
+    return None
 
 
 def error_response(error: str, generated_sql: str = None, table_used: str = None):
@@ -82,6 +117,48 @@ async def ask_question_stream(
             
             # Save user message to chat
             add_message(chat_id, "user", question)
+            
+            # Check if this is a visualization-only request (e.g., "show me in line chart")
+            requested_viz = is_visualization_only_request(question)
+            if requested_viz and chat_id:
+                last_result = get_last_result(chat_id)
+                if last_result.get('data') and last_result.get('columns'):
+                    logger.info(f"[STREAM] Visualization-only request: '{question}' -> reusing previous data as {requested_viz}")
+                    
+                    columns = last_result['columns']
+                    result_data = last_result['data']
+                    viz_type = requested_viz
+                    
+                    # Send metadata with previous data
+                    metadata = {
+                        "type": "metadata",
+                        "columns": columns,
+                        "data": result_data,
+                        "row_count": len(result_data),
+                        "viz_type": viz_type,
+                        "table_used": last_result.get('question', 'previous query')
+                    }
+                    yield f"data: {json.dumps(metadata, default=str)}\n\n"
+                    
+                    # Generate summary for the new visualization (use sync call)
+                    history_context = format_history_for_prompt(chat_id)
+                    answer_prompt = build_answer_prompt(
+                        f"Showing previous data as {viz_type} chart: {last_result.get('question', question)}", 
+                        result_data, history_context, system_prompt, viz_type
+                    )
+                    
+                    # Use synchronous LLM call for simplicity
+                    full_answer = llm_call(answer_prompt, max_tokens=1500)
+                    yield f"data: {json.dumps({'type': 'token', 'content': full_answer})}\n\n"
+                    
+                    # Save the summary
+                    add_message(chat_id, "assistant", full_answer, {
+                        "columns": columns, "data": result_data, "viz_type": viz_type
+                    })
+                    add_to_history(chat_id, question, full_answer, columns, result_data, viz_type)
+                    
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    return
             
             # Phase 1: Fetch datasets
             phase_start = time.time()

@@ -141,14 +141,16 @@ async function askQuestion() {
                 setTimeout(() => {
                   renderVisualization(vizId, vizType, columns, vizData);
                 }, 50);
-              } else {
-                // Render table directly - autoExpand when viz_type is explicitly 'table'
-                const autoExpand = (vizType === 'table');
+              } else if (vizType === 'table') {
+                // Render table only when explicitly requested
                 vizPlaceholder.innerHTML = `
                   <div class="message-data-table viz-inline">
-                    ${renderDataTable(columns, vizData, autoExpand)}
+                    ${renderDataTable(columns, vizData, true)}
                   </div>
                 `;
+              } else {
+                // viz_type is 'none' - don't show any visualization
+                vizPlaceholder.innerHTML = '';
               }
             }
 
@@ -195,46 +197,44 @@ async function askQuestion() {
 function renderDataTable(columns, data, autoExpand = false) {
   if (!columns || !data || data.length === 0) return '';
 
-  // Limit display to 10 rows with pagination
-  const displayData = data.slice(0, 10);
-  const hasMore = data.length > 10;
+  const previewSize = 10;
+  const pageSize = 20;
+  const totalRows = data.length;
+  const hasMore = totalRows > previewSize;
+  const tableId = `table-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  // Store data for expansion/pagination
+  if (hasMore) {
+    window._tableData = window._tableData || {};
+    window._tableData[tableId] = { columns, data, pageSize, currentPage: 1, expanded: false };
+  }
 
   let html = '';
 
   // If autoExpand, show table directly without details wrapper
   if (autoExpand) {
-    html = `<div class="data-table-wrapper"><table class="data-table"><thead><tr>`;
+    html = `<div class="data-table-container" id="${tableId}-container">`;
   } else {
-    // Wrap in details/summary for collapsed state
     html = `
     <details class="data-details">
       <summary class="data-summary">
         <span class="icon">📋</span>
-        <span>View Table</span>
+        <span>View Table (${totalRows} rows)</span>
       </summary>
-      <div class="data-table-wrapper">
-        <table class="data-table"><thead><tr>`;
+      <div class="data-table-container" id="${tableId}-container">`;
   }
 
-  columns.forEach(col => {
-    html += `<th>${escapeHtml(col)}</th>`;
-  });
+  // Build initial preview (first 10 rows)
+  html += buildTableRows(tableId, columns, data.slice(0, previewSize));
 
-  html += '</tr></thead><tbody>';
-
-  displayData.forEach(row => {
-    html += '<tr>';
-    columns.forEach(col => {
-      const value = row[col];
-      html += `<td>${formatCellValue(value)}</td>`;
-    });
-    html += '</tr>';
-  });
-
-  html += '</tbody></table>';
-
+  // Add "View More" button if there's more data
   if (hasMore) {
-    html += `<div class="table-more">... and ${data.length - 10} more rows</div>`;
+    html += `
+      <div class="table-actions" id="${tableId}-actions">
+        <button class="view-more-btn" onclick="expandTable('${tableId}')">
+          View All ${totalRows} Rows →
+        </button>
+      </div>`;
   }
 
   // Close the appropriate wrapper
@@ -248,14 +248,131 @@ function renderDataTable(columns, data, autoExpand = false) {
 }
 
 /**
+ * Build table HTML with rows
+ */
+function buildTableRows(tableId, columns, rows) {
+  let html = `<div class="data-table-wrapper" id="${tableId}-body"><table class="data-table"><thead><tr>`;
+
+  columns.forEach(col => {
+    html += `<th>${escapeHtml(formatColumnHeader(col))}</th>`;
+  });
+
+  html += '</tr></thead><tbody>';
+
+  rows.forEach(row => {
+    html += '<tr>';
+    columns.forEach(col => {
+      html += `<td>${formatCellValue(row[col])}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  return html;
+}
+
+/**
+ * Expand table to show all data with pagination
+ */
+function expandTable(tableId) {
+  const tableData = window._tableData[tableId];
+  if (!tableData) return;
+
+  const { columns, data, pageSize } = tableData;
+  const totalPages = Math.ceil(data.length / pageSize);
+  tableData.expanded = true;
+  tableData.currentPage = 1;
+
+  // Build full paginated view
+  let html = buildTableRows(tableId, columns, data.slice(0, pageSize));
+
+  // Add pagination controls
+  if (totalPages > 1) {
+    html += `
+      <div class="table-pagination" id="${tableId}-pagination">
+        <button class="pagination-btn" onclick="changePage('${tableId}', -1)" id="${tableId}-prev" disabled>← Prev</button>
+        <span class="pagination-info">Page <span id="${tableId}-page">1</span> of ${totalPages}</span>
+        <button class="pagination-btn" onclick="changePage('${tableId}', 1)" id="${tableId}-next">Next →</button>
+      </div>`;
+  }
+
+  // Replace content
+  const container = document.getElementById(`${tableId}-container`);
+  if (container) {
+    container.innerHTML = html;
+  }
+}
+
+/**
+ * Change table page
+ */
+function changePage(tableId, direction) {
+  const tableData = window._tableData[tableId];
+  if (!tableData) return;
+
+  const { columns, data, pageSize } = tableData;
+  const totalPages = Math.ceil(data.length / pageSize);
+
+  tableData.currentPage += direction;
+  tableData.currentPage = Math.max(1, Math.min(tableData.currentPage, totalPages));
+
+  const startIdx = (tableData.currentPage - 1) * pageSize;
+  const pageData = data.slice(startIdx, startIdx + pageSize);
+
+  // Update table body
+  const bodyContainer = document.getElementById(`${tableId}-body`);
+  if (bodyContainer) {
+    bodyContainer.outerHTML = buildTableRows(tableId, columns, pageData);
+  }
+
+  // Update pagination state
+  document.getElementById(`${tableId}-page`).textContent = tableData.currentPage;
+  document.getElementById(`${tableId}-prev`).disabled = tableData.currentPage === 1;
+  document.getElementById(`${tableId}-next`).disabled = tableData.currentPage === totalPages;
+}
+
+/**
+ * Format column header for display (snake_case -> Title Case)
+ */
+function formatColumnHeader(col) {
+  if (!col) return '';
+  return col
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .replace(/Inr/g, '(INR)')
+    .replace(/Pct/g, '%')
+    .replace(/Qty/g, 'Quantity');
+}
+
+/**
  * Format cell value for display
  */
 function formatCellValue(value) {
   if (value === null || value === undefined) return '<span class="null-value">-</span>';
-  if (typeof value === 'number') {
-    // Format numbers with commas
-    return value.toLocaleString();
+
+  // Handle numbers
+  if (typeof value === 'number' || (typeof value === 'string' && !isNaN(parseFloat(value)) && value.match(/^-?\d+\.?\d*$/))) {
+    const num = parseFloat(value);
+
+    // Format large numbers as Crores
+    if (Math.abs(num) >= 10000000) {
+      return `₹${(num / 10000000).toFixed(2)} Cr`;
+    }
+    // Format medium numbers as Lakhs
+    if (Math.abs(num) >= 100000) {
+      return `₹${(num / 100000).toFixed(2)} L`;
+    }
+    // Format with commas for smaller numbers
+    if (Number.isInteger(num)) {
+      return num.toLocaleString('en-IN');
+    }
+    // Decimal numbers - check if it looks like a percentage
+    if (Math.abs(num) <= 100 && num !== Math.floor(num)) {
+      return `${num.toFixed(2)}%`;
+    }
+    return num.toLocaleString('en-IN', { maximumFractionDigits: 2 });
   }
+
   return escapeHtml(String(value));
 }
 
